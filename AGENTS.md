@@ -16,7 +16,7 @@ dev/gate.sh          # syntax, lint, every test (tests/, kit/guards/)
 |---|---|
 | `lab_agent/` | the real package: `agent.py` (the loop), `jobs.py` (job discovery and headers), `runner.py` (running one job as a real process group), `writer.py` (the results tree), `gitio.py` (the only git commands used), `state.py` (what's already finished), `config.py` (settings) |
 | `tests/` | one `test_*.py` per module above, run by `dev/run_tests.py` |
-| `deploy/` | the systemd unit and install script for a lab machine |
+| `deploy/` | `connect.sh` (the one command that sets up a lab machine), the user systemd unit, a udev rule for USB access |
 | `kit/guards/` | a copy of the generic guard kit from `ideal-project-playbook`; not this project's style to enforce (excluded from lint), but its own tests still run |
 | `docs/design.md` | how the three repositories (this one, a jobs repo, a results repo) fit together |
 

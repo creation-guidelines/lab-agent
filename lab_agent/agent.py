@@ -42,14 +42,21 @@ class Agent:
         self._last_push = 0.0
         self._last_heartbeat = 0.0
         self._stopping = False
+        # read once, used to build the authenticated remote URLs: never written to disk, never passed to a job as an
+        # environment variable (job scripts get the rest of os.environ, see _start, but not this one explicitly removed there)
+        self._token = os.environ.get("LAB_AGENT_GITHUB_TOKEN", "")
+        self._jobs_url = gitio.with_token(cfg.jobs_remote, self._token)
+        self._results_url = gitio.with_token(cfg.results_remote, self._token)
 
     def setup(self):
+        if not self._token and (self.cfg.jobs_remote.startswith("https://github.com") or self.cfg.results_remote.startswith("https://github.com")):
+            raise SystemExit("lab-agent: set LAB_AGENT_GITHUB_TOKEN (a token with access to the jobs and results repositories)")
         os.makedirs(self.cfg.home, exist_ok=True)
         os.makedirs(self.cfg.local_logs, exist_ok=True)
         os.makedirs(self.cfg.workdir, exist_ok=True)
-        gitio.ensure_clone(self.cfg.jobs_remote, self.cfg.jobs_branch, self.cfg.jobs_clone, self.cfg.git_timeout, self.cfg.ssh_key_jobs)
-        gitio.ensure_clone(self.cfg.results_remote, self.cfg.results_branch, self.cfg.results_clone, self.cfg.git_timeout, self.cfg.ssh_key_results)
-        gitio.reset_results_to_remote(self.cfg.results_clone, self.cfg.results_branch, self.cfg.git_timeout, self.cfg.ssh_key_results)
+        gitio.ensure_clone(self._jobs_url, self.cfg.jobs_branch, self.cfg.jobs_clone, self.cfg.git_timeout)
+        gitio.ensure_clone(self._results_url, self.cfg.results_branch, self.cfg.results_clone, self.cfg.git_timeout)
+        gitio.reset_results_to_remote(self.cfg.results_clone, self.cfg.results_branch, self.cfg.git_timeout)
         resuming = self.state.resuming()
         if resuming:
             log.warning("a job (%s) was running when the agent last stopped; recording it as interrupted", resuming["name"])
@@ -80,7 +87,7 @@ class Agent:
             log.info("stopping: leaving %s running for the next agent start to find", self.current_job.name)
 
     def _pass(self):
-        gitio.sync_jobs(self.cfg.jobs_clone, self.cfg.jobs_branch, self.cfg.git_timeout, self.cfg.ssh_key_jobs)
+        gitio.sync_jobs(self.cfg.jobs_clone, self.cfg.jobs_branch, self.cfg.git_timeout)
         jobs_dir = os.path.join(self.cfg.jobs_clone, self.cfg.jobs_dir)
         found, errors = jobs.discover(jobs_dir, self.cfg.default_timeout, self.cfg.max_timeout)
         for filename, message in errors.items():
@@ -172,7 +179,7 @@ class Agent:
                                  last_heartbeat=now, done_count=len(self.state.done), host=socket.gethostname())
         message = f"progress: {self.current_job.name}" if self.current_job else "heartbeat: idle"
         try:
-            pushed = gitio.push_results(self.cfg.results_clone, self.cfg.results_branch, message, self.cfg.git_timeout, self.cfg.ssh_key_results)
+            pushed = gitio.push_results(self.cfg.results_clone, self.cfg.results_branch, message, self.cfg.git_timeout)
             if pushed:
                 self._last_push = now
             self._last_heartbeat = now

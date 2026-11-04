@@ -177,6 +177,23 @@ def test_resuming_after_a_restart_marks_the_interrupted_job_and_moves_on():
     subprocess.run(["pkill", "-f", "0001-interrupted"], capture_output=True)  # clean up the orphan
 
 
+def test_setup_refuses_to_start_against_a_real_github_remote_with_no_token():
+    import contextlib
+    import io
+
+    cfg = Config(jobs_remote="https://github.com/example/jobs.git", results_remote="https://github.com/example/results.git",
+                home=tempfile.mkdtemp())
+    agent = Agent(cfg)
+    os.environ.pop("LAB_AGENT_GITHUB_TOKEN", None)
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            agent.setup()
+    except SystemExit as error:
+        assert "LAB_AGENT_GITHUB_TOKEN" in str(error)
+        return
+    raise AssertionError("should have refused to start")
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
 
 if __name__ == "__main__":
