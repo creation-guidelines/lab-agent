@@ -1,6 +1,0 @@
-Metadata-Version: 2.4
-Name: lab-agent
-Version: 0.1.0
-Summary: A pull-based agent for a lab machine: runs the scripts it finds in a git repository, one at a time, and reports progress back through git.
-License-Expression: GPL-3.0-or-later
-Requires-Python: >=3.11
