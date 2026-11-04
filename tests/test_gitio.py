@@ -132,6 +132,20 @@ def test_a_failed_git_command_raises_gitError_with_its_message():
     raise AssertionError("should have raised GitError")
 
 
+def test_with_token_inserts_credentials_into_an_https_url():
+    assert gitio.with_token("https://github.com/o/r.git", "abc123") == "https://x-access-token:abc123@github.com/o/r.git"
+
+
+def test_with_token_leaves_a_url_unchanged_when_there_is_no_token_or_it_is_not_https():
+    assert gitio.with_token("https://github.com/o/r.git", "") == "https://github.com/o/r.git"
+    assert gitio.with_token("/local/path", "abc123") == "/local/path"
+
+
+def test_with_token_does_not_double_insert_into_an_already_authenticated_url():
+    already = "https://x-access-token:old@github.com/o/r.git"
+    assert gitio.with_token(already, "new") == already
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
 
 if __name__ == "__main__":

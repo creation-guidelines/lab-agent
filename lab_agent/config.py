@@ -17,7 +17,8 @@ class ConfigError(Exception):
 
 @dataclass
 class Config:
-    jobs_remote: str                      # where jobs are read from (a git URL)
+    jobs_remote: str                      # where jobs are read from: a plain https:// URL, no credentials in it
+                                           # (the token is LAB_AGENT_GITHUB_TOKEN, never written to disk)
     results_remote: str                   # where progress is reported to (a different repository: the agent never writes where it reads)
     jobs_branch: str = "main"
     results_branch: str = "results"
@@ -33,8 +34,6 @@ class Config:
     max_pushed_log_bytes: int = 20971520  # per job; beyond it only the tail is pushed (the whole log stays on the machine)
     keep_results: int = 50                # job directories kept in the results repository; older ones are kept only on the machine
     git_timeout: int = 90                 # seconds any single git command may take
-    ssh_key_jobs: str = ""                # read-only deploy key for the jobs repository (path), if it is reached over ssh
-    ssh_key_results: str = ""             # deploy key with write access to the results repository only
     extra_env: dict = field(default_factory=dict)  # added to the environment of every job
 
     @property

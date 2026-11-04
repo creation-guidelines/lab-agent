@@ -1,0 +1,6 @@
+# udev rules so fastboot/adb work without root. Installed by connect.sh (needs sudo; it prints the exact command rather than
+# running it itself). A broad, well-known vendor-ID list; narrower than nothing, wider than just Xiaomi, since a lab machine
+# may end up testing more than one device over time.
+SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="2717", MODE="0666", GROUP="plugdev"

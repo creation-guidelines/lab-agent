@@ -8,7 +8,8 @@ pip install git+https://github.com/creation-guidelines/lab-agent.git
 ```
 
 or clone and `pip install -e .` for development (`dev/gate.sh` to check your work). See [`docs/design.md`](docs/design.md) for how
-the pieces fit together, and [`deploy/`](deploy/) to run it as a systemd service.
+the pieces fit together. To actually run it on a machine: `LAB_AGENT_GITHUB_TOKEN=... bash deploy/connect.sh` - one command,
+creates everything it needs, proves a real heartbeat lands before it calls itself done.
 
 Built to drive real hardware iteration (phones, boards — anything that can't be virtualised onto a hosted CI runner) with an AI
 agent making the changes between runs, but it has no opinion about what a job script actually does.
