@@ -121,6 +121,8 @@ chmod 600 "$HOME_CFG/env"
 cat > "$HOME_CFG/config.toml" <<EOF
 # Written by connect.sh. Re-running connect.sh overwrites this file; anything you need to keep belongs in the job scripts
 # themselves, not here. The token is in ./env (chmod 600), referenced by the systemd unit, never here.
+home = "$HOME/.local/state/lab-agent"
+
 [jobs]
 remote = "https://github.com/$OWNER/$JOBS_REPO.git"
 

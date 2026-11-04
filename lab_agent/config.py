@@ -23,7 +23,10 @@ class Config:
     jobs_branch: str = "main"
     results_branch: str = "results"
     jobs_dir: str = "jobs"                # the directory in the jobs repository that holds the job scripts
-    home: str = "/var/lib/lab-agent"      # the agent's own files: state, clones, the working directory of jobs
+    # the agent's own files: state, clones, the working directory of jobs. Evaluated once, at import time, as the real
+    # current user's home - never a system path like /var/lib/lab-agent, which only a root-owned system service could write
+    # to (connect.sh runs the agent as an ordinary user, and sets this explicitly in the config.toml it writes anyway).
+    home: str = os.path.join(os.path.expanduser("~"), ".local", "state", "lab-agent")
     poll_seconds: float = 5.0             # how often to look for new jobs
     push_seconds: float = 15.0            # how often to push the running job's log
     idle_heartbeat_seconds: float = 60.0  # how often an idle agent shows it is alive
