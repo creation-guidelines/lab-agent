@@ -1,0 +1,2 @@
+[console_scripts]
+lab-agent = lab_agent.agent:main

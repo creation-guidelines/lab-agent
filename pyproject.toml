@@ -27,3 +27,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*.py" = ["BLE001"]        # a test runner's own top-level except-and-report loop deliberately catches anything a test raises
 "kit/guards/test_*.py" = ["BLE001"]
+
+[tool.setuptools]
+packages = ["lab_agent"]
+
+[project.scripts]
+lab-agent = "lab_agent.agent:main"
