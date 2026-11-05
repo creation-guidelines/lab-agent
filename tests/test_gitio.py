@@ -146,6 +146,26 @@ def test_with_token_does_not_double_insert_into_an_already_authenticated_url():
     assert gitio.with_token(already, "new") == already
 
 
+def test_push_results_author_date_is_fresh_on_every_amend_not_just_committer_date():
+    # the actual bug this guards: --amend keeps the ORIGINAL commit's author date forever unless
+    # the push explicitly resets it, even when GIT_AUTHOR_DATE is set in the environment - only the
+    # committer date updates by default, which silently leaves a stale author timestamp behind.
+    import time
+    remote = bare_remote({"status.json": "{}\n"}, branch="results")
+    local = os.path.join(tempfile.mkdtemp(), "clone")
+    gitio.ensure_clone(remote, "results", local, timeout=15)
+    open(os.path.join(local, "status.json"), "w").write('{"n": 0}\n')
+    gitio.push_results(local, "results", "first", timeout=15)
+    first_author = sh("log", "-1", "--format=%ad", cwd=local).strip()
+
+    time.sleep(1.1)
+    open(os.path.join(local, "status.json"), "w").write('{"n": 1}\n')
+    gitio.push_results(local, "results", "second", timeout=15)
+    second_author = sh("log", "-1", "--format=%ad", cwd=local).strip()
+
+    assert second_author != first_author, "the author date did not advance between two amended pushes a second apart"
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ Authentication is whatever the ``remote`` URL itself carries - an ``https://x-ac
 only run git commands against whatever URL they are given, with a timeout (``config.git_timeout``) and a clean environment (no interactive
 prompts: a stuck credential prompt must fail fast, not hang the agent), and raise ``GitError`` with the command's stderr on failure.
 """
+import email.utils
 import os
 import subprocess
 
@@ -58,14 +59,21 @@ def push_results(path, branch, message, timeout, author=("lab-agent", "lab-agent
     pushing its log every few seconds must not leave hours of commit history behind), then force-push. Returns ``True`` if
     there was anything to commit, ``False`` if the working tree matched what was already committed (nothing is pushed in
     that case, so an idle agent does not spam the remote)."""
-    env = {"GIT_AUTHOR_NAME": author[0], "GIT_AUTHOR_EMAIL": author[1], "GIT_COMMITTER_NAME": author[0], "GIT_COMMITTER_EMAIL": author[1]}
+    # A real timestamp, not the word "now" (git's parser rejects that literal) - and --reset-author below, because
+    # --amend otherwise keeps the ORIGINAL commit's author identity and date untouched even when GIT_AUTHOR_DATE is
+    # set; only --reset-author actually applies it. Without both, a push made just now could show an author
+    # timestamp hours or days old to anyone reading raw git log (the committer date alone did update, which is less
+    # obviously wrong but still confusing next to a stale author date).
+    now = email.utils.formatdate(localtime=True)
+    env = {"GIT_AUTHOR_NAME": author[0], "GIT_AUTHOR_EMAIL": author[1], "GIT_AUTHOR_DATE": now,
+          "GIT_COMMITTER_NAME": author[0], "GIT_COMMITTER_EMAIL": author[1], "GIT_COMMITTER_DATE": now}
     _run(["add", "-A"], cwd=path, timeout=timeout)
     status = _run(["status", "--porcelain"], cwd=path, timeout=timeout)
     if not status.strip():
         return False
     # amend, not a new commit: the whole point of a "rolling" results push is that the branch stays ONE commit, however many
     # times this runs, so a job pushing its log every 15 seconds for hours does not leave hours of history behind.
-    _run(["commit", "--amend", "-q", "-m", message], cwd=path, timeout=timeout, extra_env=env)
+    _run(["commit", "--amend", "--reset-author", "-q", "-m", message], cwd=path, timeout=timeout, extra_env=env)
     _run(["push", "--force-with-lease", "origin", f"HEAD:{branch}"], cwd=path, timeout=timeout)
     return True
 
