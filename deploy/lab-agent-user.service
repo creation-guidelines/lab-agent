@@ -5,6 +5,11 @@
 Description=lab-agent: runs jobs pulled from git, reports progress through git
 After=network-online.target
 Wants=network-online.target
+# Unlimited restarts: a flaky network or a crashed job must never cause systemd to give up retrying.
+# StartLimitIntervalSec/Burst are Unit-level directives, not Service-level - putting them under
+# [Service] is silently ignored (systemd logs "Unknown key", and the default 5-per-10s limit stays
+# in effect instead of the unlimited retries intended here).
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -13,7 +18,6 @@ EnvironmentFile=%h/.config/lab-agent/env
 ExecStart=%h/.local/share/lab-agent/venv/bin/lab-agent --config %h/.config/lab-agent/config.toml
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=0
 KillMode=process
 TimeoutStopSec=15
 
