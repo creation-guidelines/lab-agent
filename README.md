@@ -112,9 +112,11 @@ Details in [AGENTS.md](AGENTS.md#notifications-ntfy).
 ## Following a long session from your phone
 
 `lab-agent board` holds what the agent is doing; your machine sends it to your info channel every 5
-minutes while anything is open. Write to the agent in the **inbox** channel from the ntfy app: it
+minutes while anything is open. Write to the agent in the **inbox** channel from the ntfy app, or
+`lab-agent inbox "text"` on the machine: it
 reads new messages at natural pauses, and you get a receipt. (Run `lab-agent notify-setup` again to
-add the inbox to an existing setup; your other channels are kept.)
+add the inbox to an existing setup; your other channels are kept.) `lab-agent board` is the control
+board: tasks, jobs and the conversation with a reply box, laid out for wide, square or tall windows.
 
 ## Running things as root
 

@@ -664,6 +664,16 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         .map(|s| s.lines().map(str::to_string).collect())
         .unwrap_or_default();
     let (mut etag, mut board, mut seen_once) = (None::<String>, Board::default(), false);
+    let inbox_local = state_dir.join(board::INBOX_PATH);
+    // the conversation so far, so the board's live view on this machine has it without network
+    if let Ok(Some(f)) = shared.client.get_file(
+        &cfg.owner,
+        &cfg.results_repo,
+        board::INBOX_PATH,
+        &cfg.results_branch,
+    ) {
+        let _ = std::fs::write(&inbox_local, &f.content);
+    }
     let mut last_digest = std::time::Instant::now() - Duration::from_secs(24 * 3600);
     loop {
         std::thread::sleep(BOARD_EVERY);
@@ -771,6 +781,7 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
                         "inbox: new message",
                         sha.as_deref(),
                     )?;
+                    let _ = std::fs::write(&inbox_local, serde_json::to_vec_pretty(&inbox)?);
                     Ok(())
                 });
                 match filed {

@@ -28,6 +28,8 @@ pub enum Level {
     Info,
     /// The user is needed: something failed, or a decision is waiting.
     Urgent,
+    /// The conversation channel: to the agent, from the phone or this machine.
+    Inbox,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -109,6 +111,13 @@ impl Notifier {
         let (topic, priority, tags) = match level {
             Level::Info => (&self.cfg.info_topic, "3", "robot"),
             Level::Urgent => (&self.cfg.urgent_topic, "5", "rotating_light"),
+            Level::Inbox => (
+                self.cfg.inbox_topic.as_ref().ok_or_else(|| {
+                    anyhow!("there is no inbox channel here yet: run `lab-agent notify-setup`")
+                })?,
+                "3",
+                "speech_balloon",
+            ),
         };
         let url = format!("{}/{topic}", self.cfg.server.trim_end_matches('/'));
         let mut request = self
@@ -459,6 +468,35 @@ mod tests {
         let old = "server = \"https://ntfy.sh\"\ninfo_topic = \"a\"\nurgent_topic = \"b\"\n";
         let cfg: NotifyConfig = toml::from_str(old).unwrap();
         assert_eq!(cfg.inbox_topic, None);
+    }
+
+    #[test]
+    fn an_inbox_message_goes_to_the_inbox_topic() {
+        let (server, seen) = capture();
+        let n = Notifier::new(NotifyConfig {
+            server,
+            info_topic: "t-info".into(),
+            urgent_topic: "t-urgent".into(),
+            inbox_topic: Some("t-inbox".into()),
+            token: None,
+        });
+        n.send(Level::Inbox, "you", "take a break").unwrap();
+        let req = seen.lock().unwrap().clone();
+        assert!(req.starts_with("POST /t-inbox "), "{req}");
+        assert!(req.ends_with("take a break"));
+    }
+
+    #[test]
+    fn without_an_inbox_channel_sending_says_how_to_add_one() {
+        let n = Notifier::new(NotifyConfig {
+            server: "http://127.0.0.1:1".into(),
+            info_topic: "a".into(),
+            urgent_topic: "b".into(),
+            inbox_topic: None,
+            token: None,
+        });
+        let err = n.send(Level::Inbox, "you", "hi").unwrap_err().to_string();
+        assert!(err.contains("notify-setup"), "{err}");
     }
 
     #[test]

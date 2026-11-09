@@ -175,11 +175,18 @@ So the user can follow a long session, and speak into it, without interrupting i
   `resume ID`, `done ID`. `lab-agent board` alone, in a terminal, is a live view with a color per state
   (on the agent's machine it reads a local copy: no network); `board show` prints it once. Done
   tasks stay a day.
+- **The control board** (`lab-agent board` in a terminal) is one live view of the whole system: tasks
+  by state, the jobs, the conversation (the user's messages, read ticks, the agent's replies) and a
+  reply box (Enter sends to the inbox). Its layout follows the window: side by side when wide,
+  a 2x2 grid when square (tiling), stacked when tall (a phone).
+- **Delivery delays are the phone's**, not the sender's: Android holds ntfy messages back unless each
+  subscription has Instant delivery on and ntfy is Unrestricted in battery settings.
   The machine running the agent sends the open tasks to the user's info channel every 5 minutes
   (`lab-agent board every MINUTES` changes it), says once when all are done, and costs the
   writer nothing but one small write per change.
 - **The inbox** is a third ntfy channel, made by `notify-setup`, that the user writes to from the
-  ntfy app. The machine files new messages in `inbox.json` (results repo). `lab-agent inbox` shows
+  ntfy app, or from the machine with `lab-agent inbox "text"`. The machine files new messages in
+  `inbox.json` (results repo). `lab-agent inbox` shows
   the unread ones; `--ack` marks them read (the user gets a receipt), `--reply "text"` sends a short
   reply to the info channel.
 

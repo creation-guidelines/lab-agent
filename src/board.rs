@@ -264,6 +264,50 @@ pub fn parse_board(bytes: &[u8]) -> Board {
     serde_json::from_slice(bytes).unwrap_or_default()
 }
 
+/// Who said a line of the conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Who {
+    User,
+    Agent,
+}
+
+/// One line of the conversation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Line {
+    pub at: f64,
+    pub who: Who,
+    pub text: String,
+    /// For the user's messages: whether the agent has read it.
+    pub read: bool,
+}
+
+/// The user's messages and the agent's replies, oldest first.
+pub fn conversation(inbox: &Inbox, board: &Board) -> Vec<Line> {
+    let upto = board
+        .inbox_read_upto
+        .as_deref()
+        .and_then(|id| inbox.messages.iter().position(|m| m.id == id));
+    let mut lines: Vec<Line> = inbox
+        .messages
+        .iter()
+        .enumerate()
+        .map(|(i, m)| Line {
+            at: m.time as f64,
+            who: Who::User,
+            text: m.text.clone(),
+            read: upto.is_some_and(|u| i <= u),
+        })
+        .chain(board.replies.iter().map(|r| Line {
+            at: r.at,
+            who: Who::Agent,
+            text: r.text.clone(),
+            read: true,
+        }))
+        .collect();
+    lines.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap_or(std::cmp::Ordering::Equal));
+    lines
+}
+
 pub fn parse_inbox(bytes: &[u8]) -> Inbox {
     serde_json::from_slice(bytes).unwrap_or_default()
 }
@@ -360,8 +404,26 @@ pub fn read_board(resolved: &Resolution) -> Result<Board> {
         .unwrap_or_default())
 }
 
-/// `lab-agent inbox [--ack] [--reply TEXT] [--json]`: the user's unread messages.
+/// `lab-agent inbox "text"` sends to the agent (the same channel the phone writes to);
+/// `lab-agent inbox [--ack] [--reply TEXT] [--json]` shows the unread messages.
 pub fn inbox_cli(resolved: &Resolution) -> Result<()> {
+    if let Some(text) = Contract::INBOX_TEXT.get_from_or_default(resolved) {
+        return send_to_agent(&text);
+    }
+    inbox_read(resolved)
+}
+
+/// Sends a message to the agent through the inbox channel, from this machine.
+pub fn send_to_agent(text: &str) -> Result<()> {
+    let cfg = crate::notify::load().ok_or_else(|| {
+        anyhow::anyhow!("notifications are not set up here: run `lab-agent notify-setup`")
+    })?;
+    crate::notify::Notifier::new(cfg).send(crate::notify::Level::Inbox, "you", text.trim())?;
+    println!("sent; the agent reads it at its next pause");
+    Ok(())
+}
+
+fn inbox_read(resolved: &Resolution) -> Result<()> {
     let (cfg, client) = client()?;
     let inbox = match client.get_file_cond(
         &cfg.owner,
@@ -540,5 +602,39 @@ mod tests {
             apply(&mut Board::default(), "done", Some("tui"), None, 1.0).is_err(),
             "a missing task is an error, not a silent no-op"
         );
+    }
+
+    #[test]
+    fn the_conversation_interleaves_by_time_and_marks_what_was_read() {
+        let inbox = Inbox {
+            messages: vec![
+                Message {
+                    id: "m1".into(),
+                    time: 10,
+                    text: "hi".into(),
+                },
+                Message {
+                    id: "m2".into(),
+                    time: 30,
+                    text: "still there?".into(),
+                },
+            ],
+        };
+        let board = Board {
+            inbox_read_upto: Some("m1".into()),
+            replies: vec![Reply {
+                id: "r1".into(),
+                text: "here".into(),
+                at: 20.0,
+            }],
+            ..Default::default()
+        };
+        let c = conversation(&inbox, &board);
+        assert_eq!(
+            c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            ["hi", "here", "still there?"]
+        );
+        assert_eq!((c[0].read, c[2].read), (true, false));
+        assert_eq!(c[1].who, Who::Agent);
     }
 }
