@@ -1,3 +1,4 @@
+use crate::contract::{ENV_JOBS_REPO, ENV_OWNER, ENV_RESULTS_REPO, ENV_TOKEN};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -62,6 +63,21 @@ pub fn token_path() -> PathBuf {
 }
 
 pub fn load() -> Result<Config> {
+    // A client with no config file (an agent, a CI job) names the repos in its environment: the
+    // one way to configure it without a file and without putting anything on a command line.
+    if let Ok(owner) = std::env::var(ENV_OWNER) {
+        let var =
+            |name: &str, default: &str| std::env::var(name).unwrap_or_else(|_| default.into());
+        return Ok(Config {
+            owner,
+            jobs_repo: var(ENV_JOBS_REPO, "lab-agent-jobs"),
+            results_repo: var(ENV_RESULTS_REPO, "lab-agent-results"),
+            jobs_branch: default_jobs_branch(),
+            results_branch: default_results_branch(),
+            max_parallel: default_max_parallel(),
+            poll_seconds: default_poll_seconds(),
+        });
+    }
     let path = config_path();
     let text = fs::read_to_string(&path).with_context(|| {
         format!(
@@ -93,6 +109,12 @@ pub fn save_token(token: &str) -> Result<()> {
 }
 
 pub fn load_token() -> Result<String> {
+    if let Ok(token) = std::env::var(ENV_TOKEN) {
+        let token = token.trim();
+        if !token.is_empty() {
+            return Ok(token.to_string());
+        }
+    }
     let path = token_path();
     let text = fs::read_to_string(&path).with_context(|| {
         format!(

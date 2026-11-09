@@ -10,6 +10,7 @@ pkgdesc='Pull-based job runner: polls a git repo for jobs, runs them on real har
 arch=('x86_64' 'aarch64')
 url='https://github.com/creation-guidelines/lab-agent'
 license=('MIT')
+depends=('ca-certificates')  # the system trust store: lab-agent talks HTTPS to GitHub and trusts the OS's CAs
 makedepends=('cargo')
 # ring (a transitive TLS dependency, via ureq) mixes C/assembly with Rust FFI; Arch's default LTO
 # renames/strips symbols across that boundary and the link fails with "undefined symbol:

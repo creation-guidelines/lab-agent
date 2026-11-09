@@ -35,7 +35,7 @@ pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
     let count = Contract::JOBS_COUNT
         .get_from_or_default(resolved)
         .unwrap_or(20);
-    let json = Contract::JOBS_JSON
+    let json = Contract::JSON
         .get_from_or_default(resolved)
         .unwrap_or(false);
 
@@ -88,16 +88,29 @@ pub fn fetch_jobs(client: &Client, cfg: &Config, count: usize) -> Result<Vec<Job
             client.get_file(&cfg.owner, &cfg.results_repo, &path, &cfg.results_branch)?
         {
             let v: serde_json::Value = serde_json::from_slice(&f.content).unwrap_or_default();
-            rows.push(JobRow {
-                name,
-                status: v["status"].as_str().unwrap_or("?").to_string(),
-                exit_code: v["exit_code"].as_i64().map(|c| c as i32),
-                started_at: v["started_at"].as_f64(),
-                finished_at: v["finished_at"].as_f64(),
-            });
+            rows.push(row_from_status(name, &v));
         }
     }
     Ok(rows)
+}
+
+/// A job's row from its `status.json`. Results written by the earlier (Python) agent carry
+/// `running`/`ok` booleans instead of a `status` word; read them too, so history still lists.
+pub fn row_from_status(name: String, v: &serde_json::Value) -> JobRow {
+    let status = match v["status"].as_str() {
+        Some(s) => s.to_string(),
+        None if v["running"].as_bool() == Some(true) => "running".to_string(),
+        None if v["ok"].as_bool() == Some(true) => "ok".to_string(),
+        None if v["ok"].as_bool() == Some(false) => "failed".to_string(),
+        None => "?".to_string(),
+    };
+    JobRow {
+        name,
+        status,
+        exit_code: v["exit_code"].as_i64().map(|c| c as i32),
+        started_at: v["started_at"].as_f64(),
+        finished_at: v["finished_at"].as_f64(),
+    }
 }
 
 /// A plain HH:MM:SS in UTC. No chrono/time dependency needed for something this simple; shared

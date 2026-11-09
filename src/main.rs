@@ -1,3 +1,4 @@
+mod agent;
 mod completions;
 mod config;
 mod connect;
@@ -52,6 +53,9 @@ fn main() -> Result<()> {
         Command::Run => daemon::run(config::load()?, config::load_token()?),
         Command::Monitor => monitor::run(config::load()?, config::load_token()?),
         Command::Jobs => jobs::run(config::load()?, config::load_token()?, &resolved),
+        Command::Submit => std::process::exit(agent::submit(&resolved)?),
+        Command::Wait => std::process::exit(agent::wait(&resolved)?),
+        Command::Logs => std::process::exit(agent::logs(&resolved)?),
         Command::SelfUpdate => self_update::run(),
         Command::Completions => completions::completions(&resolved),
         Command::Man => completions::man(),
