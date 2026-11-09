@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.12]
+
+
+### Bug Fixes
+- Notify-setup gives the phone links it can open, as QR codes, and the right DND advice ([#35](https://github.com/creation-guidelines/lab-agent/pull/35)) ([3ee81b4])
+
+
+
 ## [0.1.11]
 
 
