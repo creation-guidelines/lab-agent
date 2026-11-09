@@ -56,9 +56,9 @@ jobs:
         run: |
           git fetch --tags --force
           if [ "$EVENT" = workflow_dispatch ]; then
-            tag="${INPUT_TAG:-$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" | grep -o '"tag_name": *"lab-agent-v[0-9.]*"' | grep -o 'lab-agent-v[0-9.]*')}"
+            tag="${INPUT_TAG:-$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" | grep -o '"tag_name": *"v[0-9.]*"' | grep -o 'v[0-9.]*')}"
           else
-            tag="$(git tag --points-at "$HEAD_SHA" | grep -E '^lab-agent-v[0-9]' | head -n1 || true)"
+            tag="$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]' | head -n1 || true)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release tag: ${tag:-none (a push that cut no release)}"
@@ -142,7 +142,7 @@ jobs:
         env:
           TAG: ${{ needs.tag.outputs.tag }}
         run: |
-          bash packaging/repo/site.sh site README.md "${TAG#lab-agent-v}"
+          bash packaging/repo/site.sh site README.md "${TAG#v}"
           mkdir -p site/arch && cp -r arch-out/. site/arch/
       # rustdoc shares this same Pages deployment, at /doc - two separate workflows deploying to
       # the same site raced and clobbered each other before this was folded into one.

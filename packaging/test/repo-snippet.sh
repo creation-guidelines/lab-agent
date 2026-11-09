@@ -16,7 +16,7 @@ releases_json() {
   else curl -fsS "https://api.github.com/repos/$repo/releases?per_page=100"; fi
 }
 newest_tag() {
-  grep -o '"tag_name": *"lab-agent-v[0-9.]*"' | grep -o 'lab-agent-v[0-9.]*' | sed 's/^lab-agent-v//' \
+  grep -o '"tag_name": *"v[0-9.]*"' | grep -o 'v[0-9.]*' | sed 's/^v//' \
     | sort -u -t. -k1,1nr -k2,2nr -k3,3nr | head -n1
 }
 latest="$(releases_json | newest_tag)"

@@ -11,8 +11,8 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/creation-guidelines/lab-agent'
 license=('MIT')
 makedepends=('cargo')
-_dir="${_dir:-$pkgname-$pkgname-v$pkgver}"
-source=("${_source:-$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgname-v$pkgver.tar.gz}")
+_dir="${_dir:-$pkgname-$pkgver}"
+source=("${_source:-$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz}")
 sha256sums=('SKIP')
 
 prepare() {
