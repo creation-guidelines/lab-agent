@@ -166,7 +166,12 @@ fn already_handled(shared: &Shared, state_dir: &Path) -> Result<HashSet<String>>
         shared
             .client
             .list_dir(&cfg.owner, &cfg.results_repo, "jobs", &cfg.results_branch)?;
-    for name in &dirs {
+    // Only recent jobs can be "running": reading every old result on every start costs a request
+    // each (hundreds), for nothing.
+    let mut recent = dirs.clone();
+    recent.sort();
+    recent.reverse();
+    for name in recent.iter().take(RECENT_TO_CHECK) {
         let path = format!("jobs/{name}/status.json");
         let Some(f) =
             shared
@@ -470,6 +475,8 @@ fn push_status(
     })
 }
 
+/// How many of the newest results a starting agent reads to find jobs that were cut off.
+const RECENT_TO_CHECK: usize = 20;
 /// How often a running job's log so far is pushed.
 const PARTIAL_LOG_EVERY: Duration = Duration::from_secs(8);
 /// The contents API serves files up to 1 MB; a longer log keeps its tail.

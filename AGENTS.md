@@ -130,6 +130,9 @@ push). Treat it as unknown, never as running; `lab-agent jobs` and `monitor` sho
   The daemon's idle polling costs nothing (conditional requests: a 'not modified' answer is free);
   when the budget runs out it pauses until it returns and waits for it before giving up on a
   result, so a finished job's output is not lost. `lab-agent` exits `69` and says when it returns.
+- Leaving `lab-agent monitor` open all day costs almost nothing: every re-read is conditional and a
+  finished job never changes. (Until 0.1.10 it re-read every file every 3 seconds, ~37,000
+  requests an hour, and spent the whole budget in minutes.)
 - Polling is cheap: reads are conditional (ETag), and a "not modified" answer does not count
   against GitHub's rate limit. Writes are one commit each; do not submit in a tight loop.
 - Prefer `submit --wait --json` for one-shot work and `submit` then `wait` for long work, so a

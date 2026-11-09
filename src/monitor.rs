@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::github::Client;
-use crate::jobs::{self, JobRow};
+use crate::jobs::{self, JobRow, JobsCache};
 use anyhow::Result;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::prelude::*;
@@ -12,6 +12,8 @@ use std::time::Duration;
 /// How often fresh data is fetched in the background. The UI itself redraws far more often than
 /// this (every tick, so elapsed-time counters move smoothly) without waiting on the network.
 const FETCH_EVERY: Duration = Duration::from_secs(3);
+/// How often to look when no job is running.
+const IDLE_EVERY: Duration = Duration::from_secs(10);
 /// How long to wait for a key before redrawing anyway (keeps elapsed-time columns ticking and
 /// keeps the UI responsive to quit immediately rather than only after a fetch completes).
 const TICK: Duration = Duration::from_millis(150);
@@ -27,13 +29,27 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
     let (rows_tx, rows_rx) = mpsc::channel::<Result<Vec<JobRow>, String>>();
     thread::spawn(move || {
         let client = Client::new(token);
+        let mut cache = JobsCache::default();
         loop {
-            let result = jobs::fetch_jobs(&client, &cfg, 30).map_err(|e| e.to_string());
+            let fetched = jobs::fetch_jobs_cached(&client, &cfg, 30, &mut cache);
+            // Quiet when nothing is running: nothing is going to change.
+            let busy = fetched
+                .as_ref()
+                .is_ok_and(|rows| rows.iter().any(|r| r.status == "running" && !r.stale));
+            // A spent budget will not return sooner for being asked again.
+            let pause = match &fetched {
+                Err(e) => e
+                    .downcast_ref::<crate::github::RateLimited>()
+                    .map_or(FETCH_EVERY, |l| l.wait().min(IDLE_EVERY)),
+                Ok(_) if busy => FETCH_EVERY,
+                Ok(_) => IDLE_EVERY,
+            };
+            let result = fetched.map_err(|e| e.to_string());
             // The receiver is gone once the UI exits; stop fetching rather than error forever.
             if rows_tx.send(result).is_err() {
                 return;
             }
-            thread::sleep(FETCH_EVERY);
+            thread::sleep(pause);
         }
     });
 
