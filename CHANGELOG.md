@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.2]
+
+
+### Bug Fixes
+- Disable LTO for the Arch package - ring's C/asm FFI boundary breaks under it ([#13](https://github.com/creation-guidelines/lab-agent/pull/13)) ([a1b8bef])
+
+
+
 ## [0.1.1]
 
 
