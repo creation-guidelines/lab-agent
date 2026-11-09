@@ -1,6 +1,20 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.1]
+
+
+### Bug Fixes
+- Stop pages.yml and repos.yml racing on the same GitHub Pages deployment ([#10](https://github.com/creation-guidelines/lab-agent/pull/10)) ([4851ac7])
+- The real release tag is v<version>, not lab-agent-v<version> ([#11](https://github.com/creation-guidelines/lab-agent/pull/11)) ([58e48e4])
+- Install the musl target's std lib before cross-compiling ([#12](https://github.com/creation-guidelines/lab-agent/pull/12)) ([86e8832])
+
+
+### Miscellaneous
+- Release v0.1.0 ([#8](https://github.com/creation-guidelines/lab-agent/pull/8)) ([d58b088])
+
+
+
 ## [0.1.0]
 
 
