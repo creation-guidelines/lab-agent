@@ -285,9 +285,32 @@ mod tests {
         let out = seen.clone();
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // One read() is not one request: the body can arrive in a later packet (it does on
+            // CI). Read to the end of the headers, then to the length they declare.
+            let mut got = Vec::new();
             let mut buf = [0u8; 4096];
-            let n = stream.read(&mut buf).unwrap_or(0);
-            *out.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).to_string();
+            loop {
+                let n = stream.read(&mut buf).unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                got.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&got).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse::<usize>().unwrap_or(0))
+                        })
+                        .unwrap_or(0);
+                    if got.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            *out.lock().unwrap() = String::from_utf8_lossy(&got).to_string();
             stream
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
                 .ok();
