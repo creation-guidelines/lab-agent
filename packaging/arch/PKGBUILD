@@ -11,6 +11,10 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/creation-guidelines/lab-agent'
 license=('MIT')
 makedepends=('cargo')
+# ring (a transitive TLS dependency, via ureq) mixes C/assembly with Rust FFI; Arch's default LTO
+# renames/strips symbols across that boundary and the link fails with "undefined symbol:
+# ring_core_..." - a known interaction, not specific to this package. Disabled here only.
+options=('!lto')
 _dir="${_dir:-$pkgname-$pkgver}"
 source=("${_source:-$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz}")
 sha256sums=('SKIP')
