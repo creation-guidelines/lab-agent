@@ -144,6 +144,14 @@ jobs:
         run: |
           bash packaging/repo/site.sh site README.md "${TAG#lab-agent-v}"
           mkdir -p site/arch && cp -r arch-out/. site/arch/
+      # rustdoc shares this same Pages deployment, at /doc - two separate workflows deploying to
+      # the same site raced and clobbered each other before this was folded into one.
+      - name: The pinned toolchain (rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --no-deps --all-features --locked
+      - run: echo '<meta http-equiv="refresh" content="0; url=lab_agent/index.html">' > target/doc/index.html
+      - run: cp -r target/doc site/doc
       - name: Nothing is deployed unless every signature verifies
         run: bash packaging/repo/check-site.sh site "$FINGERPRINT"
       - uses: actions/upload-pages-artifact@v5
