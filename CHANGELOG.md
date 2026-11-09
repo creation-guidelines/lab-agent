@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.21]
+
+
+### Bug Fixes
+- The Pages deploy tries a second time when GitHub's side fails ([#55](https://github.com/creation-guidelines/lab-agent/pull/55)) ([310d456])
+- The environment's page link also when only the second deploy succeeds ([#57](https://github.com/creation-guidelines/lab-agent/pull/57)) ([8407178])
+
+
+### Features
+- The conversation goes through GitHub, not ntfy ([#58](https://github.com/creation-guidelines/lab-agent/pull/58)) ([2092e03])
+
+
+
 ## [0.1.20]
 
 
