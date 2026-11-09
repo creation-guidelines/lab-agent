@@ -681,7 +681,7 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         ) {
             Ok(crate::github::Fetched::Changed { file, etag: tag }) => {
                 let new = board::parse_board(&file.content);
-                if seen_once && !board.tasks.is_empty() && new.tasks.is_empty() {
+                if seen_once && board.live() > 0 && new.live() == 0 {
                     let _ = notifier.send(
                         Level::Info,
                         "lab-agent: all tasks done",
@@ -705,9 +705,18 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
                         );
                     }
                 }
-                if new.tasks.len() > board.tasks.len() || !seen_once {
+                if new.live() > board.live() || !seen_once {
                     last_digest = std::time::Instant::now() - Duration::from_secs(24 * 3600);
                     // report a new task soon
+                }
+                // a local copy, so the board's live view on this machine needs no network
+                let local = state_dir.join(board::BOARD_PATH);
+                let tmp = local.with_extension("json.tmp");
+                if std::fs::write(&tmp, &file.content)
+                    .and_then(|()| std::fs::rename(&tmp, &local))
+                    .is_err()
+                {
+                    eprintln!("lab-agent: could not keep a local copy of the board");
                 }
                 board = new;
                 etag = tag;

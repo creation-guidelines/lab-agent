@@ -1,5 +1,6 @@
 mod agent;
 mod board;
+mod board_tui;
 mod completions;
 mod config;
 mod connect;

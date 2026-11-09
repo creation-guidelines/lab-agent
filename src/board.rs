@@ -49,11 +49,150 @@ impl Default for Board {
     }
 }
 
+/// Where a task stands. Older boards have no state: their tasks are ongoing.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum State {
+    #[default]
+    Ongoing,
+    /// Waiting for the user.
+    Waiting,
+    Paused,
+    Done,
+}
+
+impl State {
+    pub fn word(self) -> &'static str {
+        match self {
+            State::Ongoing => "ongoing",
+            State::Waiting => "waiting for you",
+            State::Paused => "paused",
+            State::Done => "done",
+        }
+    }
+    /// Live tasks are reported; done ones are not.
+    pub fn is_live(self) -> bool {
+        self != State::Done
+    }
+    /// Display order: what needs the user first, finished last.
+    fn rank(self) -> u8 {
+        match self {
+            State::Waiting => 0,
+            State::Ongoing => 1,
+            State::Paused => 2,
+            State::Done => 3,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Task {
     pub id: String,
     pub text: String,
     pub since: f64,
+    #[serde(default)]
+    pub state: State,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<f64>,
+}
+
+/// How long a finished task stays on the board, and how many finished tasks at most.
+const KEEP_DONE_SECS: f64 = 24.0 * 3600.0;
+const KEEP_DONE: usize = 15;
+
+impl Board {
+    pub fn live(&self) -> usize {
+        self.tasks.iter().filter(|t| t.state.is_live()).count()
+    }
+
+    /// The tasks in display order: waiting for the user, ongoing, paused, then the latest done.
+    pub fn ordered(&self) -> Vec<&Task> {
+        let mut tasks: Vec<&Task> = self.tasks.iter().collect();
+        tasks.sort_by(|a, b| {
+            a.state.rank().cmp(&b.state.rank()).then(
+                b.done_at
+                    .unwrap_or(0.0)
+                    .partial_cmp(&a.done_at.unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+        });
+        tasks
+    }
+}
+
+/// One change to the board, applied the same way by the CLI and in tests.
+pub fn apply(
+    board: &mut Board,
+    action: &str,
+    id: Option<&str>,
+    text: Option<&str>,
+    at: f64,
+) -> Result<()> {
+    let need_id = || id.ok_or_else(|| anyhow::anyhow!("usage: lab-agent board {action} ID"));
+    match action {
+        "set" => {
+            let (id, text) = (
+                need_id()?,
+                text.ok_or_else(|| {
+                    anyhow::anyhow!("usage: lab-agent board set ID \"what is being done\"")
+                })?,
+            );
+            match board.tasks.iter_mut().find(|t| t.id == id) {
+                Some(t) => {
+                    t.text = text.to_string();
+                    if t.state == State::Done {
+                        t.since = at;
+                    }
+                    t.state = State::Ongoing;
+                    t.done_at = None;
+                }
+                None => board.tasks.push(Task {
+                    id: id.into(),
+                    text: text.into(),
+                    since: at,
+                    state: State::Ongoing,
+                    done_at: None,
+                }),
+            }
+        }
+        "wait" | "pause" | "resume" | "done" => {
+            let id = need_id()?;
+            let t = board
+                .tasks
+                .iter_mut()
+                .find(|t| t.id == id)
+                .ok_or_else(|| anyhow::anyhow!("no task {id} on the board"))?;
+            t.state = match action {
+                "wait" => State::Waiting,
+                "pause" => State::Paused,
+                "resume" => State::Ongoing,
+                _ => State::Done,
+            };
+            t.done_at = (t.state == State::Done).then_some(at);
+        }
+        "every" => {
+            board.every_minutes = id
+                .and_then(|m| m.parse().ok())
+                .filter(|m: &u64| *m > 0)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("usage: lab-agent board every MINUTES (a whole number above 0)")
+                })?;
+        }
+        "clear" => board.tasks.clear(),
+        _ => bail!("unknown board action {action}"),
+    }
+    // Finished tasks fade: kept a day, at most the newest fifteen.
+    let mut done: Vec<f64> = board.tasks.iter().filter_map(|t| t.done_at).collect();
+    done.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let cutoff = done
+        .get(KEEP_DONE - 1)
+        .copied()
+        .unwrap_or(f64::MIN)
+        .max(at - KEEP_DONE_SECS);
+    board
+        .tasks
+        .retain(|t| t.done_at.is_none_or(|d| d >= cutoff));
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -85,18 +224,28 @@ fn now() -> f64 {
 
 /// The digest of the open tasks, or `None` when there is nothing to report.
 pub fn digest(board: &Board, at: f64) -> Option<String> {
-    if board.tasks.is_empty() {
+    let live: Vec<&Task> = board
+        .ordered()
+        .into_iter()
+        .filter(|t| t.state.is_live())
+        .collect();
+    if live.is_empty() {
         return None;
     }
-    let lines: Vec<String> = board
-        .tasks
+    let lines: Vec<String> = live
         .iter()
         .map(|t| {
             let mins = ((at - t.since).max(0.0) / 60.0).round() as u64;
-            format!("- {} ({mins} min)", t.text)
+            match t.state {
+                State::Ongoing => format!("- {} ({mins} min)", t.text),
+                state => format!("- [{}] {} ({mins} min)", state.word(), t.text),
+            }
         })
         .collect();
-    Some(lines.join("\n"))
+    Some(lines.join(
+        "
+",
+    ))
 }
 
 /// Messages newer than the read marker, oldest first.
@@ -151,67 +300,67 @@ fn client() -> Result<(Config, Client)> {
     Ok((config::load()?, Client::new(config::load_token()?)))
 }
 
-/// `lab-agent board [show|set ID TEXT|done ID|every MINUTES|clear]`
+/// `lab-agent board [show|set ID TEXT|wait ID|pause ID|resume ID|done ID|every MINUTES|clear]`.
+/// With no action in a terminal it is a live view; piped, it prints once.
 pub fn board_cli(resolved: &Resolution) -> Result<()> {
-    let (cfg, client) = client()?;
-    let action = Contract::BOARD_ACTION
+    let action = Contract::BOARD_ACTION.get_from_or_default(resolved);
+    let json = Contract::JSON
         .get_from_or_default(resolved)
-        .unwrap_or_else(|| "show".into());
-    let id = Contract::BOARD_ID.get_from_or_default(resolved);
-    let text = Contract::BOARD_TEXT.get_from_or_default(resolved);
-    let board = match action.as_str() {
-        "set" => {
-            let (Some(id), Some(text)) = (id, text) else {
-                bail!("usage: lab-agent board set ID \"what is being done\"")
-            };
-            update_board(&client, &cfg, |b| {
-                match b.tasks.iter_mut().find(|t| t.id == id) {
-                    Some(t) => t.text = text.clone(),
-                    None => b.tasks.push(Task {
-                        id: id.clone(),
-                        text: text.clone(),
-                        since: now(),
-                    }),
-                }
-            })?
-        }
-        "done" => {
-            let Some(id) = id else {
-                bail!("usage: lab-agent board done ID")
-            };
-            update_board(&client, &cfg, |b| b.tasks.retain(|t| t.id != id))?
-        }
-        "every" => {
-            let minutes: u64 = id
-                .and_then(|m| m.parse().ok())
-                .filter(|m| *m > 0)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("usage: lab-agent board every MINUTES (a whole number above 0)")
-                })?;
-            update_board(&client, &cfg, |b| b.every_minutes = minutes)?
-        }
-        "clear" => update_board(&client, &cfg, |b| b.tasks.clear())?,
-        _ => client
-            .get_file(&cfg.owner, &cfg.jobs_repo, BOARD_PATH, &cfg.jobs_branch)?
-            .map(|f| parse_board(&f.content))
-            .unwrap_or_default(),
+        .unwrap_or(false);
+    if action.is_none() && !json && std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        return crate::board_tui::run(resolved);
+    }
+    let action = action.unwrap_or_else(|| "show".into());
+    let board = if action == "show" {
+        read_board(resolved)?
+    } else {
+        let (cfg, client) = client()?;
+        let id = Contract::BOARD_ID.get_from_or_default(resolved);
+        let text = Contract::BOARD_TEXT.get_from_or_default(resolved);
+        apply(
+            &mut Board::default(),
+            &action,
+            id.as_deref(),
+            text.as_deref(),
+            now(),
+        )?; // check the arguments before touching the network
+        update_board(&client, &cfg, |b| {
+            let _ = apply(b, &action, id.as_deref(), text.as_deref(), now());
+        })?
     };
-    if Contract::JSON
-        .get_from_or_default(resolved)
-        .unwrap_or(false)
-    {
+    if json {
         println!("{}", serde_json::to_string_pretty(&board)?);
     } else {
         println!(
-            "sent to the info channel every {} min while tasks are open",
+            "live tasks go to the info channel every {} min",
             board.every_minutes
         );
-        match digest(&board, now()) {
-            Some(d) => println!("{d}"),
-            None => println!("(no open tasks)"),
+        for t in board.ordered() {
+            println!("  {:<16} {:<10} {}", t.state.word(), t.id, t.text);
+        }
+        if board.tasks.is_empty() {
+            println!("  (empty)");
         }
     }
     Ok(())
+}
+
+/// The board, from this machine's copy when the agent runs here (no network), else from GitHub.
+pub fn read_board(resolved: &Resolution) -> Result<Board> {
+    let local = crate::daemon::state_dir().join(BOARD_PATH);
+    let remote = Contract::REMOTE
+        .get_from_or_default(resolved)
+        .unwrap_or(false);
+    if !remote {
+        if let Ok(bytes) = std::fs::read(&local) {
+            return Ok(parse_board(&bytes));
+        }
+    }
+    let (cfg, client) = client()?;
+    Ok(client
+        .get_file(&cfg.owner, &cfg.jobs_repo, BOARD_PATH, &cfg.jobs_branch)?
+        .map(|f| parse_board(&f.content))
+        .unwrap_or_default())
 }
 
 /// `lab-agent inbox [--ack] [--reply TEXT] [--json]`: the user's unread messages.
@@ -296,11 +445,15 @@ mod tests {
             id: "a".into(),
             text: "fixing audio start-up".into(),
             since: 0.0,
+            state: State::Ongoing,
+            done_at: None,
         });
         b.tasks.push(Task {
             id: "b".into(),
             text: "writing it up upstream".into(),
             since: 540.0,
+            state: State::Ongoing,
+            done_at: None,
         });
         assert_eq!(
             digest(&b, 600.0).unwrap(),
@@ -328,5 +481,45 @@ mod tests {
         assert_eq!(parse_board(b"{}"), Board::default());
         assert_eq!(parse_board(b"not json").every_minutes, 5);
         assert_eq!(parse_board(br#"{"every_minutes":10}"#).every_minutes, 10);
+    }
+
+    #[test]
+    fn states_move_as_asked_and_done_is_not_reported() {
+        let mut b = Board::default();
+        apply(&mut b, "set", Some("a"), Some("audio"), 0.0).unwrap();
+        apply(&mut b, "set", Some("b"), Some("tui"), 0.0).unwrap();
+        apply(&mut b, "wait", Some("a"), None, 60.0).unwrap();
+        apply(&mut b, "done", Some("b"), None, 120.0).unwrap();
+        assert_eq!(
+            b.ordered()[0].state,
+            State::Waiting,
+            "what needs the user comes first"
+        );
+        assert_eq!(b.live(), 1);
+        assert_eq!(
+            digest(&b, 120.0).unwrap(),
+            "- [waiting for you] audio (2 min)"
+        );
+        apply(&mut b, "resume", Some("a"), None, 180.0).unwrap();
+        assert_eq!(digest(&b, 180.0).unwrap(), "- audio (3 min)");
+        assert!(apply(&mut b, "pause", Some("nope"), None, 0.0).is_err());
+    }
+
+    #[test]
+    fn finished_tasks_fade_after_a_day() {
+        let mut b = Board::default();
+        apply(&mut b, "set", Some("old"), Some("x"), 0.0).unwrap();
+        apply(&mut b, "done", Some("old"), None, 10.0).unwrap();
+        apply(&mut b, "set", Some("new"), Some("y"), 100_000.0).unwrap();
+        assert!(
+            b.tasks.iter().all(|t| t.id != "old"),
+            "a task done more than a day ago is gone"
+        );
+    }
+
+    #[test]
+    fn an_old_task_without_a_state_is_ongoing() {
+        let b = parse_board(br#"{"tasks":[{"id":"a","text":"t","since":1.0}]}"#);
+        assert_eq!(b.tasks[0].state, State::Ongoing);
     }
 }

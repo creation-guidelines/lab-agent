@@ -171,7 +171,10 @@ or a repo. Nobody shares a channel: two users of lab-agent never see each other'
 So the user can follow a long session, and speak into it, without interrupting it:
 
 - **The board** (`board.json` in the jobs repo) says what is being done, a sentence per task:
-  `lab-agent board set ID "what is being done"`, `lab-agent board done ID`, `lab-agent board`.
+  `lab-agent board set ID "what is being done"`, then `wait ID` (waiting for the user), `pause ID`,
+  `resume ID`, `done ID`. `lab-agent board` alone, in a terminal, is a live view with a color per state
+  (on the agent's machine it reads a local copy: no network); `board show` prints it once. Done
+  tasks stay a day.
   The machine running the agent sends the open tasks to the user's info channel every 5 minutes
   (`lab-agent board every MINUTES` changes it), says once when all are done, and costs the
   writer nothing but one small write per change.
