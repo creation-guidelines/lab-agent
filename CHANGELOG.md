@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.20]
+
+
+### Features
+- Planned tasks and projects on the board; the chat keeps every reply ([#53](https://github.com/creation-guidelines/lab-agent/pull/53)) ([13f3bff])
+
+
+
 ## [0.1.19]
 
 
