@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.5]
+
+
+### Features
+- The agent API - submit, wait, logs; env-configured client; partial logs ([#21](https://github.com/creation-guidelines/lab-agent/pull/21)) ([e44dd2e])
+
+
+
 ## [0.1.4]
 
 
