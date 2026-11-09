@@ -169,6 +169,13 @@ pub fn run(resolved: &Resolution) -> Result<()> {
     result
 }
 
+/// Rows the reply box needs for `chars` characters (and the cursor) at `width` columns inside its
+/// borders, between one and six: it grows with the message instead of hiding it past the edge.
+fn input_rows(chars: usize, width: u16) -> u16 {
+    let width = usize::from(width.saturating_sub(2).max(1));
+    ((chars + 1).div_ceil(width)).clamp(1, 6) as u16
+}
+
 /// The window's shape, in terms of what fits: terminal cells are about twice as tall as wide.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum Shape {
@@ -196,7 +203,8 @@ struct Areas {
     input: Rect,
 }
 
-fn layout(area: Rect) -> Areas {
+/// `input` is the reply box's height, borders included (it grows with what is typed).
+fn layout(area: Rect, input: u16) -> Areas {
     use Constraint::{Length, Min, Percentage};
     let split = |dir, area, c: &[Constraint]| {
         Layout::default()
@@ -216,7 +224,7 @@ fn layout(area: Rect) -> Areas {
                 cols[0],
                 &[Percentage(50), Percentage(50)],
             );
-            let right = split(Direction::Vertical, cols[1], &[Min(3), Length(3)]);
+            let right = split(Direction::Vertical, cols[1], &[Min(3), Length(input)]);
             Areas {
                 tasks: left[0],
                 jobs: left[1],
@@ -228,7 +236,7 @@ fn layout(area: Rect) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(45), Min(5), Length(3)],
+                &[Percentage(45), Min(5), Length(input)],
             );
             let top = split(
                 Direction::Horizontal,
@@ -246,7 +254,7 @@ fn layout(area: Rect) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(28), Min(5), Length(3), Percentage(24)],
+                &[Percentage(28), Min(5), Length(input), Percentage(24)],
             );
             Areas {
                 tasks: rows[0],
@@ -317,7 +325,9 @@ fn draw(
     input: &str,
     status: &str,
 ) {
-    let a = layout(f.area());
+    // the box's width does not depend on its height: measure with one row, then grow it
+    let width = layout(f.area(), 3).input.width;
+    let a = layout(f.area(), input_rows(input.chars().count(), width) + 2);
     let at = now();
     let title = match error {
         Some(e) => format!(" control board ({source}) - cannot read: {e} "),
@@ -414,6 +424,7 @@ fn draw(
     };
     f.render_widget(
         Paragraph::new(format!("{input}▏"))
+            .wrap(Wrap { trim: false })
             .block(Block::default().borders(Borders::ALL).title(hint)),
         a.input,
     );
@@ -429,7 +440,7 @@ mod tests {
 
     #[test]
     fn a_desktop_window_puts_the_conversation_beside_the_work() {
-        let a = layout(r(200, 50));
+        let a = layout(r(200, 50), 3);
         assert_eq!(shape(r(200, 50)), Shape::Wide);
         assert!(a.talk.x > a.tasks.x && a.jobs.x == a.tasks.x && a.jobs.y > a.tasks.y);
         assert!(a.input.y > a.talk.y && a.input.x == a.talk.x);
@@ -437,7 +448,7 @@ mod tests {
 
     #[test]
     fn a_square_window_puts_tasks_and_jobs_side_by_side_on_top() {
-        let a = layout(r(100, 50));
+        let a = layout(r(100, 50), 3);
         assert_eq!(shape(r(100, 50)), Shape::Square);
         assert!(a.tasks.y == a.jobs.y && a.jobs.x > a.tasks.x);
         assert!(a.talk.y > a.tasks.y && a.input.y > a.talk.y);
@@ -445,7 +456,7 @@ mod tests {
 
     #[test]
     fn a_phone_stacks_everything_with_the_reply_box_under_the_conversation() {
-        let a = layout(r(48, 90));
+        let a = layout(r(48, 90), 3);
         assert_eq!(shape(r(48, 90)), Shape::Tall);
         assert!(a.tasks.y < a.talk.y && a.talk.y < a.input.y && a.input.y < a.jobs.y);
         assert!([a.tasks.x, a.talk.x, a.input.x, a.jobs.x]
@@ -463,5 +474,23 @@ mod tests {
             .map(|s| format!("{:?}", look(*s).1.fg))
             .collect();
         assert_eq!((marks.len(), colors.len()), (4, 4));
+    }
+
+    #[test]
+    fn the_reply_box_grows_with_the_message_and_stops_at_six_rows() {
+        assert_eq!(input_rows(0, 42), 1);
+        assert_eq!(
+            input_rows(39, 42),
+            1,
+            "40 columns inside the borders: 39 chars and the cursor fit"
+        );
+        assert_eq!(input_rows(40, 42), 2);
+        assert_eq!(input_rows(10_000, 42), 6);
+        let small = layout(r(48, 90), 3);
+        let grown = layout(r(48, 90), 8);
+        assert!(
+            grown.input.height == 8 && grown.talk.height < small.talk.height,
+            "the conversation gives up the room"
+        );
     }
 }
