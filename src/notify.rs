@@ -11,7 +11,8 @@
 //! asks for a notification (an AI agent, a script) never needs the secret.
 
 use crate::contract::{
-    Contract, ENV_NTFY_INFO_TOPIC, ENV_NTFY_SERVER, ENV_NTFY_TOKEN, ENV_NTFY_URGENT_TOPIC,
+    Contract, ENV_NTFY_INBOX_TOPIC, ENV_NTFY_INFO_TOPIC, ENV_NTFY_SERVER, ENV_NTFY_TOKEN,
+    ENV_NTFY_URGENT_TOPIC,
 };
 use anyhow::{anyhow, ensure, Context, Result};
 use argenv_resolve::*;
@@ -34,6 +35,9 @@ pub struct NotifyConfig {
     pub server: String,
     pub info_topic: String,
     pub urgent_topic: String,
+    /// Where the user writes to the agent (from the ntfy app). Older setups have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox_topic: Option<String>,
     /// For a server that needs a login. ntfy.sh with random topics needs none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
@@ -53,6 +57,9 @@ pub fn load() -> Option<NotifyConfig> {
             server: std::env::var(ENV_NTFY_SERVER).unwrap_or_else(|_| DEFAULT_SERVER.into()),
             urgent_topic: std::env::var(ENV_NTFY_URGENT_TOPIC).unwrap_or_else(|_| info.clone()),
             info_topic: info,
+            inbox_topic: std::env::var(ENV_NTFY_INBOX_TOPIC)
+                .ok()
+                .filter(|t| !t.is_empty()),
             token: std::env::var(ENV_NTFY_TOKEN).ok().filter(|t| !t.is_empty()),
         });
     }
@@ -162,6 +169,58 @@ fn qr(text: &str) -> Option<String> {
     )
 }
 
+/// One message the user sent to the inbox channel.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Incoming {
+    pub id: String,
+    pub time: i64,
+    pub text: String,
+}
+
+/// New messages on the inbox channel since message `since` (all cached ones when `None`), oldest
+/// first. ntfy answers with one JSON object per line; only `message` events carry text.
+pub fn poll_inbox(cfg: &NotifyConfig, since: Option<&str>) -> Result<Vec<Incoming>> {
+    let Some(topic) = &cfg.inbox_topic else {
+        return Ok(Vec::new());
+    };
+    let url = format!(
+        "{}/{topic}/json?poll=1&since={}",
+        cfg.server.trim_end_matches('/'),
+        since.unwrap_or("all")
+    );
+    let mut request = ureq::get(&url).timeout(Duration::from_secs(10));
+    if let Some(token) = &cfg.token {
+        request = request.set("Authorization", &format!("Bearer {token}"));
+    }
+    let body = request
+        .call()
+        .map_err(|e| {
+            anyhow!(
+                "could not read the inbox channel: {}",
+                match &e {
+                    ureq::Error::Status(code, _) => format!("the server answered {code}"),
+                    ureq::Error::Transport(t) => t.kind().to_string(),
+                }
+            )
+        })?
+        .into_string()?;
+    Ok(parse_ndjson(&body))
+}
+
+fn parse_ndjson(body: &str) -> Vec<Incoming> {
+    body.lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|v| v["event"] == "message")
+        .filter_map(|v| {
+            Some(Incoming {
+                id: v["id"].as_str()?.to_string(),
+                time: v["time"].as_i64().unwrap_or(0),
+                text: v["message"].as_str().unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
 /// HTTP headers carry ASCII: anything else in a title is shown as `?` rather than failing.
 fn ascii(text: &str) -> String {
     text.chars()
@@ -241,10 +300,19 @@ pub fn setup() -> Result<()> {
         }
         _ => false,
     };
-    let (info_topic, urgent_topic) = match (&existing, keep) {
-        (Some(c), true) => (c.info_topic.clone(), c.urgent_topic.clone()),
-        _ => (random_topic("info")?, random_topic("urgent")?),
+    let (info_topic, urgent_topic, kept_inbox) = match (&existing, keep) {
+        (Some(c), true) => (
+            c.info_topic.clone(),
+            c.urgent_topic.clone(),
+            c.inbox_topic.clone(),
+        ),
+        _ => (random_topic("info")?, random_topic("urgent")?, None),
     };
+    // The inbox is newer than the other two: an existing setup gets one added, keeping the rest.
+    let inbox_topic = Some(match kept_inbox {
+        Some(t) => t,
+        None => random_topic("inbox")?,
+    });
     let token = if interactive && server != DEFAULT_SERVER {
         let t = rpassword::prompt_password("access token for that server (blank: none): ")?;
         (!t.trim().is_empty()).then(|| t.trim().to_string())
@@ -255,6 +323,7 @@ pub fn setup() -> Result<()> {
         server,
         info_topic,
         urgent_topic,
+        inbox_topic,
         token,
     };
     save(&cfg)?;
@@ -278,7 +347,12 @@ pub fn setup() -> Result<()> {
         "\nOn your phone (ntfy app installed): scan each code with the camera, or open the link on"
     );
     println!("the phone - the app subscribes by itself. Do not use the + button: it suggests a new name.");
-    for (name, topic) in [("info", &cfg.info_topic), ("urgent", &cfg.urgent_topic)] {
+    let inbox = cfg.inbox_topic.clone().unwrap_or_default();
+    for (name, topic) in [
+        ("info", &cfg.info_topic),
+        ("urgent", &cfg.urgent_topic),
+        ("inbox", &inbox),
+    ] {
         let link = deep_link(&cfg.server, topic, &format!("lab-agent {name}"));
         println!(
             "\n{name}:\n{}{link}",
@@ -286,7 +360,9 @@ pub fn setup() -> Result<()> {
         );
     }
     println!(
-        "\nTo let urgent messages ring through Do Not Disturb, in Android: Settings > Apps > ntfy >\n\
+        "\nThe inbox is how you talk to the agent while it works: open \"lab-agent inbox\" in the app and\n\
+         type. It reads new messages at natural pauses, and you get a receipt on the info channel.\n\
+         \nTo let urgent messages ring through Do Not Disturb, in Android: Settings > Apps > ntfy >\n\
          Notifications > the \"Max priority\" category > allow it to override Do Not Disturb.\n\n\
          These two names are the secret: anyone who knows one can read it, so keep them to yourself.\n\
          On the public ntfy.sh, messages are not encrypted; for that, use your own ntfy server or one\n\
@@ -359,6 +435,33 @@ mod tests {
     }
 
     #[test]
+    fn only_message_events_are_messages() {
+        let body = concat!(
+            r#"{"id":"o1","time":1,"event":"open","topic":"t"}"#,
+            "\n",
+            r#"{"id":"m1","time":10,"event":"message","topic":"t","message":"stop the flash"}"#,
+            "\n",
+            r#"{"id":"k1","time":11,"event":"keepalive","topic":"t"}"#,
+            "\n",
+            r#"{"id":"m2","time":12,"event":"message","topic":"t","message":"ok go on"}"#,
+            "\n"
+        );
+        let got = parse_ndjson(body);
+        assert_eq!(
+            got.iter().map(|m| m.text.as_str()).collect::<Vec<_>>(),
+            ["stop the flash", "ok go on"]
+        );
+        assert_eq!(got[0].id, "m1");
+    }
+
+    #[test]
+    fn an_old_setup_without_an_inbox_still_loads() {
+        let old = "server = \"https://ntfy.sh\"\ninfo_topic = \"a\"\nurgent_topic = \"b\"\n";
+        let cfg: NotifyConfig = toml::from_str(old).unwrap();
+        assert_eq!(cfg.inbox_topic, None);
+    }
+
+    #[test]
     fn a_title_becomes_header_safe() {
         assert_eq!(ascii("build ok: Привіт\n"), "build ok: ???????");
     }
@@ -411,6 +514,7 @@ mod tests {
             server,
             info_topic: "t-info".into(),
             urgent_topic: "t-urgent".into(),
+            inbox_topic: None,
             token: Some("secret-token".into()),
         });
         n.send(Level::Urgent, "phone stuck", "come and look")
@@ -432,6 +536,7 @@ mod tests {
             server: "http://127.0.0.1:1".into(), // nothing listens there
             info_topic: "labagent-info-topsecret".into(),
             urgent_topic: "x".into(),
+            inbox_topic: None,
             token: None,
         });
         let err = n.send(Level::Info, "t", "m").unwrap_err().to_string();

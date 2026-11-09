@@ -194,6 +194,12 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
         claimed.len()
     );
 
+    {
+        let shared = Arc::clone(&shared);
+        let state_dir = state_dir.clone();
+        std::thread::spawn(move || watch_board_and_inbox(&shared, &state_dir));
+    }
+
     let mut state = PollState::default();
     loop {
         flush_unsent(&shared, &state_dir);
@@ -636,6 +642,143 @@ fn push_status(
         )?;
         Ok(())
     })
+}
+
+/// How often the board and the inbox are looked at. Both reads are free when nothing changed (a
+/// conditional GitHub read; ntfy is not GitHub).
+const BOARD_EVERY: Duration = Duration::from_secs(30);
+
+/// Keeps the user told while the agent works, from this machine, so nobody spends tokens on it:
+/// the open tasks every `every_minutes`, a note when they are all done, a receipt when inbox
+/// messages are read, each new reply; and the user's new inbox messages filed for the agent.
+fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
+    use crate::board::{self, Board, Inbox};
+    use crate::notify::{Level, Notifier};
+    let cfg = &shared.cfg;
+    let cursor_path = state_dir.join("inbox.cursor");
+    let sent_path = state_dir.join("board.replies-sent");
+    let mut cursor = std::fs::read_to_string(&cursor_path)
+        .ok()
+        .map(|s| s.trim().to_string());
+    let mut sent: HashSet<String> = std::fs::read_to_string(&sent_path)
+        .map(|s| s.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let (mut etag, mut board, mut seen_once) = (None::<String>, Board::default(), false);
+    let mut last_digest = std::time::Instant::now() - Duration::from_secs(24 * 3600);
+    loop {
+        std::thread::sleep(BOARD_EVERY);
+        let Some(ncfg) = crate::notify::load() else {
+            continue; // notifications are not set up on this machine
+        };
+        let notifier = Notifier::new(ncfg.clone());
+        // 1. the board (a free 304 when unchanged)
+        match shared.client.get_file_cond(
+            &cfg.owner,
+            &cfg.jobs_repo,
+            board::BOARD_PATH,
+            &cfg.jobs_branch,
+            etag.as_deref(),
+        ) {
+            Ok(crate::github::Fetched::Changed { file, etag: tag }) => {
+                let new = board::parse_board(&file.content);
+                if seen_once && !board.tasks.is_empty() && new.tasks.is_empty() {
+                    let _ = notifier.send(
+                        Level::Info,
+                        "lab-agent: all tasks done",
+                        "Nothing is open on the board.",
+                    );
+                }
+                if seen_once
+                    && new.inbox_read_upto.is_some()
+                    && new.inbox_read_upto != board.inbox_read_upto
+                {
+                    let _ = notifier.send(Level::Info, "lab-agent: read", "Your message was read.");
+                }
+                for reply in &new.replies {
+                    if sent.insert(reply.id.clone()) {
+                        if seen_once {
+                            let _ = notifier.send(Level::Info, "Claude", &reply.text);
+                        }
+                        let _ = std::fs::write(
+                            &sent_path,
+                            sent.iter().cloned().collect::<Vec<_>>().join("\n"),
+                        );
+                    }
+                }
+                if new.tasks.len() > board.tasks.len() || !seen_once {
+                    last_digest = std::time::Instant::now() - Duration::from_secs(24 * 3600);
+                    // report a new task soon
+                }
+                board = new;
+                etag = tag;
+                seen_once = true;
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("lab-agent: board: {e:#}"),
+        }
+        // 2. the digest, while anything is open
+        let every = Duration::from_secs(board.every_minutes.max(1) * 60);
+        if last_digest.elapsed() >= every {
+            if let Some(text) = board::digest(&board, now_unix()) {
+                if notifier
+                    .send(Level::Info, "lab-agent: what I'm doing", &text)
+                    .is_ok()
+                {
+                    last_digest = std::time::Instant::now();
+                }
+            }
+        }
+        // 3. the user's new inbox messages, filed in the results repo for the agent
+        match crate::notify::poll_inbox(&ncfg, cursor.as_deref()) {
+            Ok(new) if !new.is_empty() => {
+                let filed = with_retry(shared, "inbox", || {
+                    let current = shared.client.get_file(
+                        &cfg.owner,
+                        &cfg.results_repo,
+                        board::INBOX_PATH,
+                        &cfg.results_branch,
+                    )?;
+                    let (mut inbox, sha) = match current {
+                        Some(f) => (board::parse_inbox(&f.content), Some(f.sha)),
+                        None => (Inbox::default(), None),
+                    };
+                    for m in &new {
+                        if !inbox.messages.iter().any(|x| x.id == m.id) {
+                            inbox.messages.push(board::Message {
+                                id: m.id.clone(),
+                                time: m.time,
+                                text: m.text.clone(),
+                            });
+                        }
+                    }
+                    let keep = inbox.messages.len().saturating_sub(100);
+                    inbox.messages.drain(..keep);
+                    shared.client.put_file(
+                        &cfg.owner,
+                        &cfg.results_repo,
+                        board::INBOX_PATH,
+                        &cfg.results_branch,
+                        &serde_json::to_vec_pretty(&inbox)?,
+                        "inbox: new message",
+                        sha.as_deref(),
+                    )?;
+                    Ok(())
+                });
+                match filed {
+                    Ok(()) => {
+                        cursor = new.last().map(|m| m.id.clone());
+                        if let Some(c) = &cursor {
+                            let _ = std::fs::write(&cursor_path, c);
+                        }
+                        println!("lab-agent: filed {} inbox message(s)", new.len());
+                    }
+                    Err(e) => eprintln!("lab-agent: inbox: {e:#}"),
+                }
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("lab-agent: {e:#}"),
+        }
+    }
 }
 
 /// How many jobs' local files (status and log) the agent keeps.

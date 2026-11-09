@@ -18,6 +18,7 @@ pub const ENV_NTFY_SERVER: &str = "LAB_AGENT_NTFY_SERVER";
 pub const ENV_NTFY_INFO_TOPIC: &str = "LAB_AGENT_NTFY_INFO_TOPIC";
 pub const ENV_NTFY_URGENT_TOPIC: &str = "LAB_AGENT_NTFY_URGENT_TOPIC";
 pub const ENV_NTFY_TOKEN: &str = "LAB_AGENT_NTFY_TOKEN";
+pub const ENV_NTFY_INBOX_TOPIC: &str = "LAB_AGENT_NTFY_INBOX_TOPIC";
 
 /// Every subcommand. Inputs scoped to one are checked by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -31,6 +32,8 @@ pub enum Command {
     Logs,
     Notify,
     NotifySetup,
+    Board,
+    Inbox,
     SelfUpdate,
     RootExec,
     Completions,
@@ -48,6 +51,8 @@ impl Command {
         Command::Logs,
         Command::Notify,
         Command::NotifySetup,
+        Command::Board,
+        Command::Inbox,
         Command::SelfUpdate,
         Command::RootExec,
         Command::Completions,
@@ -66,6 +71,8 @@ impl Command {
             Command::Logs => "logs",
             Command::Notify => "notify",
             Command::NotifySetup => "notify-setup",
+            Command::Board => "board",
+            Command::Inbox => "inbox",
             Command::SelfUpdate => "self-update",
             Command::RootExec => "root-exec",
             Command::Completions => "completions",
@@ -89,6 +96,12 @@ impl Command {
                 "Send a notification to your phone: notify [--urgent] [--title T] MESSAGE"
             }
             Command::NotifySetup => "Set up your own private phone notification channels (ntfy)",
+            Command::Board => {
+                "What the agent is doing: board [show|set ID TEXT|done ID|every MINUTES|clear]"
+            }
+            Command::Inbox => {
+                "Your messages from the ntfy inbox channel: inbox [--ack] [--reply TEXT]"
+            }
             Command::SelfUpdate => "Update lab-agent through pacman and restart the service",
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
@@ -136,7 +149,7 @@ contract! {
         key:         "json",
         ty:          Type::Bool,
         default:     Some(false),
-        subcommands: &[Command::Jobs, Command::Submit, Command::Wait],
+        subcommands: &[Command::Jobs, Command::Submit, Command::Wait, Command::Board, Command::Inbox],
         env:         Some(Env::new("LAB_AGENT_JSON")),
         arg:         Some(Arg { negatable: false, ..Arg::long("json") }),
         summary:     "Print JSON instead of text",
@@ -313,6 +326,67 @@ contract! {
         ty:      Type::String,
         env:     Some(Env::new(ENV_NTFY_TOKEN)),
         summary: "Access token for an ntfy server that needs one (never a flag)",
+        ..Input::EMPTY
+    };
+
+    /// What to do with the board.
+    BOARD_ACTION: String, Command = Input {
+        key:         "action",
+        ty:          Type::Enum,
+        allowed:     &["show", "set", "done", "every", "clear"],
+        subcommands: &[Command::Board],
+        arg:         Some(Arg { value_name: "ACTION", ..Arg::positional(0) }),
+        summary:     "show (default), set, done, every, clear",
+        ..Input::EMPTY
+    };
+
+    /// The task's short id (or, for `every`, the minutes).
+    BOARD_ID: String, Command = Input {
+        key:         "id",
+        ty:          Type::String,
+        subcommands: &[Command::Board],
+        arg:         Some(Arg { value_name: "ID", ..Arg::positional(1) }),
+        summary:     "A short id for the task (for every: minutes between digests)",
+        ..Input::EMPTY
+    };
+
+    /// What is being done, in a sentence.
+    BOARD_TEXT: String, Command = Input {
+        key:         "text",
+        ty:          Type::String,
+        subcommands: &[Command::Board],
+        arg:         Some(Arg { value_name: "TEXT", ..Arg::positional(2) }),
+        summary:     "What is being done, in a sentence",
+        ..Input::EMPTY
+    };
+
+    /// Mark the shown messages read; the user gets a receipt.
+    INBOX_ACK: bool, Command = Input {
+        key:         "ack",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Inbox],
+        arg:         Some(Arg { negatable: false, ..Arg::long("ack") }),
+        summary:     "Mark them read; the user gets a receipt",
+        ..Input::EMPTY
+    };
+
+    /// A short reply, sent to the info channel.
+    INBOX_REPLY: String, Command = Input {
+        key:         "reply",
+        ty:          Type::String,
+        subcommands: &[Command::Inbox],
+        arg:         Some(Arg { value_name: "TEXT", ..Arg::long("reply") }),
+        summary:     "A short reply, sent to the user's info channel",
+        ..Input::EMPTY
+    };
+
+    /// Inbox topic for a reader with no notify.toml.
+    NTFY_INBOX_TOPIC: String = Input {
+        key:     "ntfy_inbox_topic",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_NTFY_INBOX_TOPIC)),
+        summary: "Inbox channel for a machine with no notify.toml (a secret; never a flag)",
         ..Input::EMPTY
     };
 
@@ -503,5 +577,26 @@ mod tests {
         )
         .is_empty());
         assert!(!lint(&Contract::records(), &resolve(&["jobs", "--urgent"])).is_empty());
+    }
+
+    #[test]
+    fn board_and_inbox_resolve_and_lint_clean() {
+        let r = resolve(&["board", "set", "audio", "fixing audio start-up"]);
+        assert!(lint(&Contract::records(), &r).is_empty());
+        assert_eq!(
+            Contract::BOARD_ACTION.get_from_or_default(&r),
+            Some("set".into())
+        );
+        assert_eq!(
+            Contract::BOARD_TEXT.get_from_or_default(&r),
+            Some("fixing audio start-up".into())
+        );
+        assert!(lint(&Contract::records(), &resolve(&["board", "every", "10"])).is_empty());
+        assert!(lint(
+            &Contract::records(),
+            &resolve(&["inbox", "--ack", "--reply", "on it"])
+        )
+        .is_empty());
+        assert!(!lint(&Contract::records(), &resolve(&["board", "--ack"])).is_empty());
     }
 }

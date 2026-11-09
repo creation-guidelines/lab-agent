@@ -109,6 +109,13 @@ to each and tells you what to subscribe to in the ntfy app. Then `lab-agent noti
 `lab-agent notify --urgent "text"`, or `lab-agent submit --notify job.sh` to hear how a job ended.
 Details in [AGENTS.md](AGENTS.md#notifications-ntfy).
 
+## Following a long session from your phone
+
+`lab-agent board` holds what the agent is doing; your machine sends it to your info channel every 5
+minutes while anything is open. Write to the agent in the **inbox** channel from the ntfy app: it
+reads new messages at natural pauses, and you get a receipt. (Run `lab-agent notify-setup` again to
+add the inbox to an existing setup; your other channels are kept.)
+
 ## Running things as root
 
 Job scripts that need root don't get a sudoers line per command. `connect` grants exactly one,
