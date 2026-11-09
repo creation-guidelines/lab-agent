@@ -371,6 +371,16 @@ contract! {
         ..Input::EMPTY
     };
 
+    /// A message to send to the agent (none: show unread messages).
+    INBOX_TEXT: String, Command = Input {
+        key:         "inbox_text",
+        ty:          Type::String,
+        subcommands: &[Command::Inbox],
+        arg:         Some(Arg { value_name: "TEXT", ..Arg::positional(0) }),
+        summary:     "Send this to the agent (none: show your unread messages)",
+        ..Input::EMPTY
+    };
+
     /// A short reply, sent to the info channel.
     INBOX_REPLY: String, Command = Input {
         key:         "reply",
@@ -598,5 +608,15 @@ mod tests {
         )
         .is_empty());
         assert!(!lint(&Contract::records(), &resolve(&["board", "--ack"])).is_empty());
+    }
+
+    #[test]
+    fn inbox_takes_a_message_to_send() {
+        let r = resolve(&["inbox", "please pause the flashing"]);
+        assert!(lint(&Contract::records(), &r).is_empty());
+        assert_eq!(
+            Contract::INBOX_TEXT.get_from_or_default(&r),
+            Some("please pause the flashing".into())
+        );
     }
 }
