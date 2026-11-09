@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to (re)build binaries for, e.g. lab-agent-v0.1.0
+        description: Existing release tag to (re)build binaries for, e.g. v0.1.0
         required: true
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
           if [ -n "$INPUT_TAG" ]; then
             tag="$INPUT_TAG"
           else
-            tag="$(git tag --points-at "$GITHUB_SHA" | grep -E '^lab-agent-v[0-9]' | head -n1 || true)"
+            tag="$(git tag --points-at "$GITHUB_SHA" | grep -E '^v[0-9]' | head -n1 || true)"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "release tag: ${tag:-none}"
@@ -121,7 +121,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-plz.outputs.tag }}
         run: |
-          version="${TAG#lab-agent-v}"
+          version="${TAG#v}"
           sum="$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz" | sha256sum | cut -d' ' -f1)"
           sed -i -e "s/^pkgver=.*/pkgver=${version}/" -e "s/^sha256sums=.*/sha256sums=('${sum}')/" packaging/arch/PKGBUILD
           gh release upload "$TAG" packaging/arch/PKGBUILD --clobber
