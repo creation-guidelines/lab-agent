@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.22]
+
+
+### Features
+- The conversation no longer depends on ntfy ([#59](https://github.com/creation-guidelines/lab-agent/pull/59)) ([0ba077b])
+
+
+
 ## [0.1.21]
 
 
