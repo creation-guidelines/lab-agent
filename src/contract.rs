@@ -7,6 +7,14 @@
 
 use argenv_resolve::*;
 
+/// A client with no config file (an agent, a CI job) is configured by these - never by a flag, so
+/// the token cannot land in shell history or a process listing.
+pub const ENV_TOKEN: &str = "LAB_AGENT_TOKEN";
+pub const ENV_OWNER: &str = "LAB_AGENT_OWNER";
+pub const ENV_JOBS_REPO: &str = "LAB_AGENT_JOBS_REPO";
+pub const ENV_RESULTS_REPO: &str = "LAB_AGENT_RESULTS_REPO";
+pub const ENV_API_URL: &str = "LAB_AGENT_API_URL";
+
 /// Every subcommand. Inputs scoped to one are checked by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Command {
@@ -14,6 +22,9 @@ pub enum Command {
     Run,
     Monitor,
     Jobs,
+    Submit,
+    Wait,
+    Logs,
     SelfUpdate,
     RootExec,
     Completions,
@@ -26,6 +37,9 @@ impl Command {
         Command::Run,
         Command::Monitor,
         Command::Jobs,
+        Command::Submit,
+        Command::Wait,
+        Command::Logs,
         Command::SelfUpdate,
         Command::RootExec,
         Command::Completions,
@@ -39,6 +53,9 @@ impl Command {
             Command::Run => "run",
             Command::Monitor => "monitor",
             Command::Jobs => "jobs",
+            Command::Submit => "submit",
+            Command::Wait => "wait",
+            Command::Logs => "logs",
             Command::SelfUpdate => "self-update",
             Command::RootExec => "root-exec",
             Command::Completions => "completions",
@@ -55,6 +72,9 @@ impl Command {
             Command::Run => "The daemon loop (normally started by the systemd service)",
             Command::Monitor => "A live TUI of ongoing and recent jobs",
             Command::Jobs => "List recent jobs, as a table or JSON, for scripting",
+            Command::Submit => "Push a script as a job; with --wait, wait and print its output",
+            Command::Wait => "Wait for a job to finish: prints its output, exits with its status",
+            Command::Logs => "Print a job's output (so far, if it is still running)",
             Command::SelfUpdate => "Update lab-agent through pacman and restart the service",
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
@@ -97,15 +117,15 @@ contract! {
         ..Input::EMPTY
     };
 
-    /// Machine-readable output for `jobs`.
-    JOBS_JSON: bool, Command = Input {
+    /// Machine-readable output.
+    JSON: bool, Command = Input {
         key:         "json",
         ty:          Type::Bool,
         default:     Some(false),
-        subcommands: &[Command::Jobs],
-        env:         Some(Env::new("LAB_AGENT_JOBS_JSON")),
+        subcommands: &[Command::Jobs, Command::Submit, Command::Wait],
+        env:         Some(Env::new("LAB_AGENT_JSON")),
         arg:         Some(Arg { negatable: false, ..Arg::long("json") }),
-        summary:     "Print JSON instead of a table",
+        summary:     "Print JSON instead of text",
         ..Input::EMPTY
     };
 
@@ -117,6 +137,123 @@ contract! {
         subcommands: &[Command::Completions],
         arg:         Some(Arg { value_name: "SHELL", ..Arg::positional(0) }),
         summary:     "bash, zsh, fish or nushell",
+        ..Input::EMPTY
+    };
+
+    /// The script `submit` pushes (`-` or nothing: standard input).
+    SUBMIT_FILE: String, Command = Input {
+        key:         "file",
+        ty:          Type::Path,
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "FILE", ..Arg::positional(0) }),
+        summary:     "The script to run (default: standard input)",
+        ..Input::EMPTY
+    };
+
+    /// A short name for the job, which becomes part of its id.
+    SUBMIT_NAME: String, Command = Input {
+        key:         "name",
+        ty:          Type::String,
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "NAME", ..Arg::long("name") }),
+        summary:     "A short name for the job (default: the file's name)",
+        ..Input::EMPTY
+    };
+
+    /// queue: run when its turn comes. preempt: cancel what is running and go first.
+    SUBMIT_MODE: String, Command = Input {
+        key:         "mode",
+        ty:          Type::Enum,
+        allowed:     &["queue", "preempt"],
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "MODE", ..Arg::long("mode") }),
+        summary:     "queue (default) or preempt (cancel what is running, go first)",
+        ..Input::EMPTY
+    };
+
+    /// The job's own time limit, after which its whole process group is killed.
+    SUBMIT_TIMEOUT: u64, Command = Input {
+        key:         "timeout",
+        ty:          Type::Uint,
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("timeout") }),
+        summary:     "The job's own time limit in seconds (default: 300, or its # lab: header)",
+        ..Input::EMPTY
+    };
+
+    /// Wait for the job and print its output.
+    SUBMIT_WAIT: bool, Command = Input {
+        key:         "wait",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { negatable: false, ..Arg::pair("wait", 'w') }),
+        summary:     "Wait for the job, print its output, exit with its status",
+        ..Input::EMPTY
+    };
+
+    /// How long to wait before giving up (the job keeps running).
+    WITHIN: u64, Command = Input {
+        key:         "within",
+        ty:          Type::Uint,
+        subcommands: &[Command::Submit, Command::Wait],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("within") }),
+        summary:     "Stop waiting after this many seconds; the job keeps running",
+        ..Input::EMPTY
+    };
+
+    /// The job to wait for or read.
+    JOB: String, Command = Input {
+        key:         "job",
+        ty:          Type::String,
+        subcommands: &[Command::Wait, Command::Logs],
+        arg:         Some(Arg { value_name: "JOB", ..Arg::positional(0) }),
+        summary:     "The job's id, as `submit` printed it",
+        ..Input::EMPTY
+    };
+
+    /// GitHub token for a client with no config file.
+    TOKEN: String = Input {
+        key:     "token",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_TOKEN)),
+        summary: "GitHub token (repo scope) for a client with no config file; never a flag",
+        ..Input::EMPTY
+    };
+
+    /// GitHub user or org owning the jobs and results repos, for a client with no config file.
+    OWNER: String = Input {
+        key:     "owner",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_OWNER)),
+        summary: "Owner of the jobs/results repos, for a client with no config file",
+        ..Input::EMPTY
+    };
+
+    /// The jobs repo, for a client with no config file.
+    JOBS_REPO: String = Input {
+        key:     "jobs_repo",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_JOBS_REPO)),
+        summary: "The jobs repo (default: lab-agent-jobs)",
+        ..Input::EMPTY
+    };
+
+    /// The GitHub API root, for GitHub Enterprise.
+    API_URL: String = Input {
+        key:     "api_url",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_API_URL)),
+        summary: "The GitHub API root, for GitHub Enterprise (default: https://api.github.com)",
+        ..Input::EMPTY
+    };
+
+    /// The results repo, for a client with no config file.
+    RESULTS_REPO: String = Input {
+        key:     "results_repo",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_RESULTS_REPO)),
+        summary: "The results repo (default: lab-agent-results)",
         ..Input::EMPTY
     };
 }
@@ -160,7 +297,7 @@ mod tests {
     fn jobs_flags_resolve_for_jobs() {
         let r = resolve(&["jobs", "-n", "5", "--json"]);
         assert_eq!(Contract::JOBS_COUNT.get_from_or_default(&r), Some(5));
-        assert_eq!(Contract::JOBS_JSON.get_from_or_default(&r), Some(true));
+        assert_eq!(Contract::JSON.get_from_or_default(&r), Some(true));
     }
 
     #[test]
@@ -184,5 +321,58 @@ mod tests {
             Contract::COMPLETIONS_SHELL.get_from_or_default(&r),
             Some("zsh".to_string())
         );
+    }
+
+    #[test]
+    fn submit_flags_resolve() {
+        let r = resolve(&[
+            "submit",
+            "--wait",
+            "--mode",
+            "preempt",
+            "--timeout",
+            "30",
+            "--name",
+            "x",
+            "s.sh",
+        ]);
+        assert_eq!(Contract::SUBMIT_WAIT.get_from_or_default(&r), Some(true));
+        assert_eq!(
+            Contract::SUBMIT_MODE.get_from_or_default(&r),
+            Some("preempt".to_string())
+        );
+        assert_eq!(Contract::SUBMIT_TIMEOUT.get_from_or_default(&r), Some(30));
+        assert_eq!(
+            Contract::SUBMIT_FILE.get_from_or_default(&r),
+            Some("s.sh".to_string())
+        );
+        assert!(lint(&Contract::records(), &r).is_empty());
+    }
+
+    #[test]
+    fn wait_takes_the_job_as_its_positional() {
+        let r = resolve(&["wait", "--within", "60", "1700000000-build"]);
+        assert_eq!(
+            Contract::JOB.get_from_or_default(&r),
+            Some("1700000000-build".to_string())
+        );
+        assert_eq!(Contract::WITHIN.get_from_or_default(&r), Some(60));
+        assert!(lint(&Contract::records(), &r).is_empty());
+    }
+
+    #[test]
+    fn submit_only_flags_are_findings_elsewhere() {
+        assert!(!lint(&Contract::records(), &resolve(&["monitor", "--wait"])).is_empty());
+        assert!(!lint(
+            &Contract::records(),
+            &resolve(&["wait", "--mode", "queue", "x"])
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn a_bad_mode_is_a_finding() {
+        let r = resolve(&["submit", "--mode", "sideways"]);
+        assert!(!lint(&Contract::records(), &r).is_empty());
     }
 }

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 /// Reads the `# lab: mode=... timeout=...` header line a job script may carry. Defaults: queue,
 /// 300s.
-fn parse_header(script: &str) -> (Mode, Duration) {
+pub(crate) fn parse_header(script: &str) -> (Mode, Duration) {
     let mut mode = Mode::Queue;
     let mut timeout = Duration::from_secs(300);
     if let Some(line) = script
@@ -245,9 +245,35 @@ fn run_one(
     }
 
     let log_path = state_dir.join(format!("{job_name}.log"));
-    let result = job::run(script, timeout, &log_path, || cancel.load(Ordering::SeqCst))?;
+    // While the job runs, push what it has printed so far every few seconds, so whoever waits on
+    // it (`lab-agent wait`, `lab-agent logs`) sees a long build as it happens, not all at the end.
+    let done = AtomicBool::new(false);
+    let result = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let tick = Duration::from_millis(400);
+            let (mut sent, mut since) = (0, Duration::ZERO);
+            while !done.load(Ordering::SeqCst) {
+                std::thread::sleep(tick);
+                since += tick;
+                if since < PARTIAL_LOG_EVERY {
+                    continue;
+                }
+                since = Duration::ZERO;
+                let text = read_log(&log_path);
+                if text.len() != sent {
+                    sent = text.len();
+                    if let Err(e) = push_log(shared, job_name, &text) {
+                        eprintln!("lab-agent: partial log of {job_name}: {e:#}");
+                    }
+                }
+            }
+        });
+        let result = job::run(script, timeout, &log_path, || cancel.load(Ordering::SeqCst));
+        done.store(true, Ordering::SeqCst);
+        result
+    })?;
 
-    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let log = read_log(&log_path);
     let status = if result.preempted {
         "preempted"
     } else if result.timed_out {
@@ -324,6 +350,51 @@ fn push_status(
     })
 }
 
+/// How often a running job's log so far is pushed.
+const PARTIAL_LOG_EVERY: Duration = Duration::from_secs(8);
+/// The contents API serves files up to 1 MB; a longer log keeps its tail.
+const MAX_PUSHED_LOG: usize = 900_000;
+
+/// The job's output, whatever bytes it printed (a build can print non-UTF-8).
+fn read_log(path: &Path) -> String {
+    std::fs::read(path)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default()
+}
+
+fn tail_for_push(text: &str) -> String {
+    if text.len() <= MAX_PUSHED_LOG {
+        return text.to_string();
+    }
+    let mut cut = text.len() - MAX_PUSHED_LOG;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    format!("[... {cut} earlier bytes not shown ...]\n{}", &text[cut..])
+}
+
+fn push_log(shared: &Shared, job_name: &str, text: &str) -> Result<()> {
+    let cfg = &shared.cfg;
+    let path = format!("jobs/{job_name}/log/0000.txt");
+    let body = tail_for_push(text);
+    with_retry(shared, &format!("{job_name} log"), || {
+        let existing =
+            shared
+                .client
+                .get_file(&cfg.owner, &cfg.results_repo, &path, &cfg.results_branch)?;
+        shared.client.put_file(
+            &cfg.owner,
+            &cfg.results_repo,
+            &path,
+            &cfg.results_branch,
+            body.as_bytes(),
+            &format!("log: {job_name}"),
+            existing.map(|f| f.sha).as_deref(),
+        )?;
+        Ok(())
+    })
+}
+
 fn push_result(
     shared: &Shared,
     job_name: &str,
@@ -332,28 +403,8 @@ fn push_result(
     started_at: f64,
     log: &str,
 ) -> Result<()> {
-    let cfg = &shared.cfg;
-    // The log first: a result whose status says "finished" must already have its log.
-    let log_path = format!("jobs/{job_name}/log/0000.txt");
-    with_retry(shared, &format!("{job_name} log"), || {
-        let existing = shared.client.get_file(
-            &cfg.owner,
-            &cfg.results_repo,
-            &log_path,
-            &cfg.results_branch,
-        )?;
-        shared.client.put_file(
-            &cfg.owner,
-            &cfg.results_repo,
-            &log_path,
-            &cfg.results_branch,
-            log.as_bytes(),
-            &format!("log: {job_name}"),
-            existing.map(|f| f.sha).as_deref(),
-        )?;
-        Ok(())
-    })
-    .context("the log")?;
+    // The log first: a result whose status says "finished" must already have its final log.
+    push_log(shared, job_name, log).context("the log")?;
     push_status(
         shared,
         job_name,

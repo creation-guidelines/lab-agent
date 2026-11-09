@@ -8,6 +8,8 @@ use serde_json::{json, Value};
 /// client, kept simple on purpose.
 pub struct Client {
     token: String,
+    /// The API root: <https://api.github.com>, or a GitHub Enterprise server's.
+    base: String,
     agent: ureq::Agent,
 }
 
@@ -17,12 +19,38 @@ pub struct FileContent {
     pub sha: String,
 }
 
+/// The answer to a conditional read.
+#[derive(Debug)]
+pub enum Fetched {
+    /// There is no such file.
+    Missing,
+    /// It is the same as when the ETag was issued.
+    Unchanged,
+    /// It is new, or changed; `etag` is for the next conditional read.
+    Changed {
+        file: FileContent,
+        etag: Option<String>,
+    },
+}
+
 impl Client {
+    /// A client for GitHub, or for a GitHub Enterprise server when `LAB_AGENT_API_URL` is set.
     pub fn new(token: String) -> Self {
+        let base = std::env::var(crate::contract::ENV_API_URL)
+            .unwrap_or_else(|_| "https://api.github.com".to_string());
+        Client::with_base(token, &base)
+    }
+
+    pub fn with_base(token: String, base: &str) -> Self {
         Client {
             token,
+            base: base.trim_end_matches('/').to_string(),
             agent: ureq::AgentBuilder::new().build(),
         }
+    }
+
+    fn api(&self, tail: &str) -> String {
+        format!("{}{tail}", self.base)
     }
 
     fn auth(&self, req: ureq::Request) -> ureq::Request {
@@ -32,7 +60,7 @@ impl Client {
     }
 
     pub fn repo_exists(&self, owner: &str, repo: &str) -> Result<bool> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}");
+        let url = self.api(&format!("/repos/{owner}/{repo}"));
         match self.auth(self.agent.get(&url)).call() {
             Ok(_) => Ok(true),
             Err(ureq::Error::Status(404, _)) => Ok(false),
@@ -44,9 +72,9 @@ impl Client {
         // Works for both user-owned and org-owned targets.
         let who = self.whoami()?;
         let url = if who == owner {
-            "https://api.github.com/user/repos".to_string()
+            self.api("/user/repos")
         } else {
-            format!("https://api.github.com/orgs/{owner}/repos")
+            self.api(&format!("/orgs/{owner}/repos"))
         };
         let body = json!({ "name": repo, "private": private, "auto_init": true });
         self.auth(self.agent.post(&url)).send_json(body)?;
@@ -55,7 +83,7 @@ impl Client {
 
     fn whoami(&self) -> Result<String> {
         let resp: Value = self
-            .auth(self.agent.get("https://api.github.com/user"))
+            .auth(self.agent.get(&self.api("/user")))
             .call()?
             .into_json()?;
         Ok(resp["login"].as_str().unwrap_or_default().to_string())
@@ -69,17 +97,45 @@ impl Client {
         path: &str,
         r#ref: &str,
     ) -> Result<Option<FileContent>> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}");
-        match self.auth(self.agent.get(&url)).call() {
+        match self.get_file_cond(owner, repo, path, r#ref, None)? {
+            Fetched::Changed { file, .. } => Ok(Some(file)),
+            Fetched::Missing | Fetched::Unchanged => Ok(None),
+        }
+    }
+
+    /// [`Client::get_file`], sending the ETag of an earlier read. GitHub answers "not modified"
+    /// without a body, and a conditional request answered that way does not count against the
+    /// rate limit - which is what makes polling a job's result every second affordable.
+    pub fn get_file_cond(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        r#ref: &str,
+        etag: Option<&str>,
+    ) -> Result<Fetched> {
+        let url = self.api(&format!("/repos/{owner}/{repo}/contents/{path}?ref={ref}"));
+        let mut req = self.auth(self.agent.get(&url));
+        if let Some(tag) = etag {
+            req = req.set("If-None-Match", tag);
+        }
+        match req.call() {
+            // ureq reports only 4xx/5xx as errors: a 304 is an Ok response with no body.
+            Ok(resp) if resp.status() == 304 => Ok(Fetched::Unchanged),
             Ok(resp) => {
+                let etag = resp.header("ETag").map(str::to_string);
                 let v: Value = resp.into_json()?;
                 let b64 = v["content"].as_str().unwrap_or_default();
                 let clean: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
                 let content = STANDARD.decode(clean)?;
                 let sha = v["sha"].as_str().unwrap_or_default().to_string();
-                Ok(Some(FileContent { content, sha }))
+                Ok(Fetched::Changed {
+                    file: FileContent { content, sha },
+                    etag,
+                })
             }
-            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(ureq::Error::Status(304, _)) => Ok(Fetched::Unchanged),
+            Err(ureq::Error::Status(404, _)) => Ok(Fetched::Missing),
             Err(e) => Err(anyhow!("reading {owner}/{repo}:{path}@{ref}: {e}")),
         }
     }
@@ -92,7 +148,7 @@ impl Client {
         path: &str,
         r#ref: &str,
     ) -> Result<Vec<String>> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={ref}");
+        let url = self.api(&format!("/repos/{owner}/{repo}/contents/{path}?ref={ref}"));
         match self.auth(self.agent.get(&url)).call() {
             Ok(resp) => {
                 let v: Value = resp.into_json()?;
@@ -124,7 +180,7 @@ impl Client {
         message: &str,
         sha: Option<&str>,
     ) -> Result<String> {
-        let url = format!("https://api.github.com/repos/{owner}/{repo}/contents/{path}");
+        let url = self.api(&format!("/repos/{owner}/{repo}/contents/{path}"));
         let mut body = json!({
             "message": message,
             "content": STANDARD.encode(content),
@@ -141,5 +197,70 @@ impl Client {
             .as_str()
             .unwrap_or_default()
             .to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// Serves the given raw HTTP responses, one per connection and in order, on a local port.
+    fn serve(responses: Vec<String>) -> Client {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0u8; 4096];
+                let _ = stream.read(&mut request);
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        Client::with_base("token".into(), &format!("http://{addr}"))
+    }
+
+    fn json(status: &str, body: &str, extra: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\n{extra}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[test]
+    fn a_304_is_unchanged_not_a_json_error() {
+        // The bug this pins: ureq returns a 304 as Ok with an empty body, and parsing that as JSON
+        // failed with "EOF while parsing a value" on the first conditional re-read.
+        let client = serve(vec![json("304 Not Modified", "", "ETag: \"abc\"\r\n")]);
+        let got = client
+            .get_file_cond("o", "r", "p", "main", Some("\"abc\""))
+            .unwrap();
+        assert!(matches!(got, Fetched::Unchanged), "{got:?}");
+    }
+
+    #[test]
+    fn a_404_is_missing() {
+        let client = serve(vec![json(
+            "404 Not Found",
+            "{\"message\":\"Not Found\"}",
+            "",
+        )]);
+        let got = client.get_file_cond("o", "r", "p", "main", None).unwrap();
+        assert!(matches!(got, Fetched::Missing), "{got:?}");
+    }
+
+    #[test]
+    fn a_200_carries_the_content_and_the_etag() {
+        let body = "{\"content\":\"aGk=\\n\",\"sha\":\"s1\"}";
+        let client = serve(vec![json("200 OK", body, "ETag: \"v1\"\r\n")]);
+        match client.get_file_cond("o", "r", "p", "main", None).unwrap() {
+            Fetched::Changed { file, etag } => {
+                assert_eq!(file.content, b"hi");
+                assert_eq!(file.sha, "s1");
+                assert_eq!(etag.as_deref(), Some("\"v1\""));
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

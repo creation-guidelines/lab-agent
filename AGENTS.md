@@ -16,6 +16,9 @@ connect` and is otherwise unrelated to this repo.
 
 ## Architecture, briefly
 
+- `src/contract.rs` — the single argenv declaration of every subcommand and input; parsing, linting, `--help`, completions and the man page all derive from it.
+- `src/agent.rs` — the agent API (`submit`, `wait`, `logs`); its exit statuses and JSON shapes are a contract, see below.
+- `src/completions.rs` — a thin adapter over argenv's generator; nothing is written by hand.
 - `src/main.rs` — CLI entry point. Subcommand selection (`connect`/`run`/`monitor`/`root-exec`)
   is plain `argv[1]` dispatch; argenv's `contract!` macro declares the shared flags (currently
   just `--verbose`), not a subcommand tree.
@@ -39,6 +42,86 @@ connect` and is otherwise unrelated to this repo.
   `packaging/repo/FINGERPRINT.txt`). The private half of that key is the `REPO_SIGNING_KEY`
   GitHub Actions secret; nothing else has it, and the jobs that use it (`with-key.sh`,
   `build-arch.sh`) never build or run the project's own code.
+
+## The agent API: using lab-agent from another program
+
+If you are an AI agent (or a CI job, or a script) and a lab machine runs `lab-agent run`, you do
+not need a shell on it. Push a script, wait for it, read its output. Everything goes through the
+jobs and results repos on GitHub, so nothing listens on a port and the machine can sit behind NAT.
+
+**Configure a client with the environment - never with flags** (a flag lands in shell history and
+process listings):
+
+| variable | meaning |
+|---|---|
+| `LAB_AGENT_TOKEN` | GitHub token with `repo` scope |
+| `LAB_AGENT_OWNER` | user or org that owns the repos |
+| `LAB_AGENT_JOBS_REPO` | default `lab-agent-jobs` |
+| `LAB_AGENT_RESULTS_REPO` | default `lab-agent-results` |
+| `LAB_AGENT_API_URL` | GitHub Enterprise API root; default `https://api.github.com` |
+
+On the lab machine itself, `lab-agent connect` writes a config file instead and none of these are
+needed.
+
+**The verbs** (all of them are declared in `src/contract.rs`; `lab-agent --help` lists them):
+
+```sh
+# run a script on the lab machine and wait: its output streams to stdout, the status is the exit code
+lab-agent submit --wait --name kernel-build < build.sh
+
+# ... or as JSON: one object at the end, with the whole log in "log"
+lab-agent submit --wait --json --timeout 1800 build.sh
+
+# asynchronous: prints the job id; read it later
+ID=$(lab-agent submit --name probe probe.sh)
+lab-agent wait "$ID" --within 600       # streams output; exit 75 if it is still running after 600s
+lab-agent logs "$ID"                    # the output so far (a running job's log is pushed every ~8s)
+lab-agent jobs -n 20 --json             # recent jobs: name, status, exit_code, started_at, finished_at
+```
+
+**A job id** is `<unix-seconds>-<name>`; ids sort in run order, and the job's script is
+`jobs/<id>.sh` in the jobs repo. A script may start with a header, which `submit` writes for you
+from `--mode` / `--timeout`:
+
+```sh
+# lab: mode=queue timeout=300
+```
+
+- `queue` (default): runs when there is room under the agent's `max_parallel`.
+- `preempt`: cancels the jobs running at that moment, then runs first.
+- `timeout`: seconds; when it expires the job's **whole process group** is killed, not just the
+  script, so a stuck child cannot hold the agent.
+
+**Exit statuses** of `wait` and `submit --wait`:
+
+| status | meaning |
+|---|---|
+| `0` | the job succeeded |
+| the job's own status | it failed (`1` if it reported none) |
+| `75` | `--within` elapsed; the job may still finish (also: never picked up - is the agent running?) |
+| `124` | the job hit its own `timeout` (as `timeout(1)`) |
+| `125` | the job was cancelled (preempted) or cut off by an agent restart (`interrupted`) |
+
+**`--json` shapes.** `submit` (no `--wait`): `{"name": ID, "file": "jobs/ID.sh"}`. `wait` and
+`submit --wait`: `{"name", "status", "exit_code", "started_at", "finished_at", "elapsed_secs",
+"exit", "log"}`, where `status` is one of `running`, `ok`, `failed`, `timed_out`, `preempted`,
+`interrupted`, `exit` is the status the command exits with, and times are Unix seconds.
+`jobs --json`: a list of `{"name", "status", "exit_code", "started_at", "finished_at"}`.
+
+**Rules a caller should know**
+
+- A job with a result is never run again, whatever happens to the agent. To run something again,
+  submit it again (a new id).
+- Root is `sudo -n lab-agent root-exec -- COMMAND ARGS...` inside the script. There is no other
+  path, and `connect` granted that one line once.
+- Scripts live in a git repo and logs in another: **do not put secrets in a script or print one**.
+- A log longer than 900 KB keeps its tail (GitHub's contents API serves files up to 1 MB).
+- Polling is cheap: reads are conditional (ETag), and a "not modified" answer does not count
+  against GitHub's rate limit. Writes are one commit each; do not submit in a tight loop.
+- Prefer `submit --wait --json` for one-shot work and `submit` then `wait` for long work, so a
+  dropped connection does not lose the job: ids are durable and `wait` can be run again.
+- Heavy work (builds, anything that wants the machine's cores, anything that touches hardware)
+  belongs on the lab machine, not in your own sandbox.
 
 ## Conventions this repo follows
 

@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 argenv = "0.3"
 argenv-resolve = "0.3"
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "2", features = ["json", "native-certs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
@@ -34,6 +34,7 @@ extended-description = """\
 A pull-based job runner for hardware-in-the-loop work: polls a git repo for \
 job scripts, runs them on whatever machine it's installed on, and reports \
 results through git."""
+depends = "$auto, ca-certificates"
 section = "utils"
 priority = "optional"
 assets = [
@@ -51,6 +52,10 @@ assets = [
 [package.metadata.generate-rpm]
 name = "lab-agent"
 summary = "Pull-based job runner for hardware-in-the-loop work"
+
+[package.metadata.generate-rpm.requires]
+ca-certificates = "*"
+
 assets = [
     { source = "target/release/lab-agent", dest = "/usr/bin/lab-agent", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/lab-agent/README.md", mode = "644", doc = true },

@@ -78,6 +78,22 @@ journalctl --user -u lab-agent -f    # raw logs
 lab-agent monitor                     # a TUI listing job statuses
 ```
 
+## For agents and scripts
+
+A client needs no config file, only the environment (never a flag, so nothing lands in shell
+history): `LAB_AGENT_TOKEN`, `LAB_AGENT_OWNER`, optionally `LAB_AGENT_JOBS_REPO` /
+`LAB_AGENT_RESULTS_REPO`.
+
+```sh
+lab-agent submit --wait --name build < build.sh      # run on the lab machine; output streams back
+lab-agent submit --wait --json build.sh              # ... as JSON, with the log in "log"
+lab-agent jobs -n 10 --json                          # recent jobs
+```
+
+The job's exit status is the command's exit status (`124` timeout, `125` cancelled, `75` still
+running). The full contract - ids, JSON shapes, exit statuses, rules - is in
+[AGENTS.md](AGENTS.md#the-agent-api-using-lab-agent-from-another-program).
+
 ## Running things as root
 
 Job scripts that need root don't get a sudoers line per command. `connect` grants exactly one,
