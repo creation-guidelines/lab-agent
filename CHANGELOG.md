@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.18]
+
+
+### Features
+- Desktop popups beside ntfy, and sent messages that show at once ([#50](https://github.com/creation-guidelines/lab-agent/pull/50)) ([3d4686f])
+
+
+
 ## [0.1.17]
 
 
