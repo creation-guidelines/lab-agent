@@ -1,0 +1,41 @@
+# Maintainer: creation-guidelines
+#
+# Builds lab-agent from a release tag. The release workflow publishes this file with `pkgver`
+# and `sha256sums` filled in.
+
+pkgname=lab-agent
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Pull-based job runner: polls a git repo for jobs, runs them on real hardware, reports results through git'
+arch=('x86_64' 'aarch64')
+url='https://github.com/creation-guidelines/lab-agent'
+license=('MIT')
+makedepends=('cargo')
+_dir="${_dir:-$pkgname-$pkgname-v$pkgver}"
+source=("${_source:-$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgname-v$pkgver.tar.gz}")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$_dir"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$_dir"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$_dir"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo test --frozen --workspace
+}
+
+package() {
+  cd "$_dir"
+  install -Dm755 target/release/lab-agent -t "$pkgdir/usr/bin/"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
+}

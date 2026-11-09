@@ -1,6 +1,1 @@
-*.egg-info/
-*.pyc
-*.tmp.*
-.ruff_cache/
-__pycache__/
-build/
+/target

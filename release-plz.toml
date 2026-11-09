@@ -1,0 +1,12 @@
+[workspace]
+changelog_config = "cliff.toml"
+dependencies_update = false
+# lab-agent is distributed as binaries and distro packages, not through crates.io.
+publish = false
+git_only = true
+git_tag_enable = true
+git_release_enable = false
+
+[[package]]
+name = "lab-agent"
+git_release_enable = true
