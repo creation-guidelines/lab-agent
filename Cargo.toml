@@ -40,6 +40,12 @@ assets = [
     ["target/release/lab-agent", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/lab-agent/README.md", "644"],
     ["LICENSE", "usr/share/doc/lab-agent/LICENSE", "644"],
+    # Generated from the contract by packaging/build-packages.sh.
+    ["packaging/generated/lab-agent.bash", "usr/share/bash-completion/completions/lab-agent", "644"],
+    ["packaging/generated/_lab-agent", "usr/share/zsh/site-functions/_lab-agent", "644"],
+    ["packaging/generated/lab-agent.fish", "usr/share/fish/vendor_completions.d/lab-agent.fish", "644"],
+    ["packaging/generated/lab-agent.nu", "usr/share/nushell/vendor/autoload/lab-agent.nu", "644"],
+    ["packaging/generated/lab-agent.1.gz", "usr/share/man/man1/lab-agent.1.gz", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -49,4 +55,10 @@ assets = [
     { source = "target/release/lab-agent", dest = "/usr/bin/lab-agent", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/lab-agent/README.md", mode = "644", doc = true },
     { source = "LICENSE", dest = "/usr/share/licenses/lab-agent/LICENSE", mode = "644", doc = true },
+    # Generated from the contract by packaging/build-packages.sh.
+    { source = "packaging/generated/lab-agent.bash", dest = "/usr/share/bash-completion/completions/lab-agent", mode = "644" },
+    { source = "packaging/generated/_lab-agent", dest = "/usr/share/zsh/site-functions/_lab-agent", mode = "644" },
+    { source = "packaging/generated/lab-agent.fish", dest = "/usr/share/fish/vendor_completions.d/lab-agent.fish", mode = "644" },
+    { source = "packaging/generated/lab-agent.nu", dest = "/usr/share/nushell/vendor/autoload/lab-agent.nu", mode = "644" },
+    { source = "packaging/generated/lab-agent.1.gz", dest = "/usr/share/man/man1/lab-agent.1.gz", mode = "644", doc = true },
 ]
