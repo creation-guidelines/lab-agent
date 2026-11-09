@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.10]
+
+
+### Features
+- The monitor spends no GitHub budget - conditional reads, and local records on the machine that runs the agent ([#31](https://github.com/creation-guidelines/lab-agent/pull/31)) ([e64ab69])
+
+
+
 ## [0.1.9]
 
 
