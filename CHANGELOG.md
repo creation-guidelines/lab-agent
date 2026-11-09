@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.3]
+
+
+### Bug Fixes
+- Connect refuses to run as root, and no longer lies about systemd setup succeeding ([#15](https://github.com/creation-guidelines/lab-agent/pull/15)) ([894b72a])
+
+
+
 ## [0.1.2]
 
 
