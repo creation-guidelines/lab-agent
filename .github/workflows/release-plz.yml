@@ -73,6 +73,8 @@ jobs:
           ref: ${{ needs.release-plz.outputs.tag }}
       - name: The pinned toolchain (rust-toolchain.toml)
         run: rustup show
+      - name: The musl target's standard library (not installed by `rustup show` alone)
+        run: rustup target add "${{ matrix.target }}"
       - uses: Swatinem/rust-cache@v2
       - run: |
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
