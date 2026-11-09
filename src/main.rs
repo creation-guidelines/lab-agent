@@ -6,6 +6,7 @@ mod config;
 mod connect;
 mod contract;
 mod daemon;
+mod desktop;
 mod github;
 mod job;
 mod jobs;

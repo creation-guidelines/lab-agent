@@ -115,7 +115,9 @@ Details in [AGENTS.md](AGENTS.md#notifications-ntfy).
 minutes while anything is open. Write to the agent in the **inbox** channel from the ntfy app, or
 `lab-agent inbox "text"` on the machine: it
 reads new messages at natural pauses, and you get a receipt. (Run `lab-agent notify-setup` again to
-add the inbox to an existing setup; your other channels are kept.) `lab-agent board` is the control
+add the inbox to an existing setup; your other channels are kept.) Every notification also pops up on the
+desktop (KDE, GNOME and anything speaking the freedesktop spec; a small window otherwise).
+`lab-agent board` is the control
 board: tasks, jobs and the conversation with a reply box, laid out for wide, square or tall windows.
 
 ## Running things as root

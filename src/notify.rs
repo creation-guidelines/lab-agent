@@ -43,6 +43,13 @@ pub struct NotifyConfig {
     /// For a server that needs a login. ntfy.sh with random topics needs none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// Also show each message as a desktop popup on this machine (on unless set to false).
+    #[serde(default = "yes")]
+    pub desktop: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 pub const DEFAULT_SERVER: &str = "https://ntfy.sh";
@@ -63,6 +70,7 @@ pub fn load() -> Option<NotifyConfig> {
                 .ok()
                 .filter(|t| !t.is_empty()),
             token: std::env::var(ENV_NTFY_TOKEN).ok().filter(|t| !t.is_empty()),
+            desktop: true,
         });
     }
     load_file()
@@ -106,8 +114,18 @@ impl Notifier {
         }
     }
 
-    /// Sends `message` to the channel for `level`. An error never contains the topic.
+    /// Sends `message` to the channel for `level`, and shows it as a desktop popup too.
+    /// An error never contains the topic.
     pub fn send(&self, level: Level, title: &str, message: &str) -> Result<()> {
+        self.deliver(level, title, message, true)
+    }
+
+    /// The same without a desktop popup: for read receipts, which are noise on a desktop.
+    pub fn send_quiet(&self, level: Level, title: &str, message: &str) -> Result<()> {
+        self.deliver(level, title, message, false)
+    }
+
+    fn deliver(&self, level: Level, title: &str, message: &str, popup: bool) -> Result<()> {
         let (topic, priority, tags) = match level {
             Level::Info => (&self.cfg.info_topic, "3", "robot"),
             Level::Urgent => (&self.cfg.urgent_topic, "5", "rotating_light"),
@@ -119,6 +137,9 @@ impl Notifier {
                 "speech_balloon",
             ),
         };
+        if self.cfg.desktop && popup {
+            crate::desktop::popup(level, title, message);
+        }
         let url = format!("{}/{topic}", self.cfg.server.trim_end_matches('/'));
         let mut request = self
             .agent
@@ -334,6 +355,8 @@ pub fn setup() -> Result<()> {
         urgent_topic,
         inbox_topic,
         token,
+        // a choice made earlier is kept; a new setup shows popups
+        desktop: existing.as_ref().is_none_or(|c| c.desktop),
     };
     save(&cfg)?;
     println!(
@@ -479,6 +502,7 @@ mod tests {
             urgent_topic: "t-urgent".into(),
             inbox_topic: Some("t-inbox".into()),
             token: None,
+            desktop: false,
         });
         n.send(Level::Inbox, "you", "take a break").unwrap();
         let req = seen.lock().unwrap().clone();
@@ -494,6 +518,7 @@ mod tests {
             urgent_topic: "b".into(),
             inbox_topic: None,
             token: None,
+            desktop: false,
         });
         let err = n.send(Level::Inbox, "you", "hi").unwrap_err().to_string();
         assert!(err.contains("notify-setup"), "{err}");
@@ -554,6 +579,7 @@ mod tests {
             urgent_topic: "t-urgent".into(),
             inbox_topic: None,
             token: Some("secret-token".into()),
+            desktop: false,
         });
         n.send(Level::Urgent, "phone stuck", "come and look")
             .unwrap();
@@ -576,6 +602,7 @@ mod tests {
             urgent_topic: "x".into(),
             inbox_topic: None,
             token: None,
+            desktop: false,
         });
         let err = n.send(Level::Info, "t", "m").unwrap_err().to_string();
         assert!(!err.contains("topsecret"), "{err}");

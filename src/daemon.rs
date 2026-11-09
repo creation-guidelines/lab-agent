@@ -702,7 +702,11 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
                     && new.inbox_read_upto.is_some()
                     && new.inbox_read_upto != board.inbox_read_upto
                 {
-                    let _ = notifier.send(Level::Info, "lab-agent: read", "Your message was read.");
+                    let _ = notifier.send_quiet(
+                        Level::Info,
+                        "lab-agent: read",
+                        "Your message was read.",
+                    );
                 }
                 for reply in &new.replies {
                     if sent.insert(reply.id.clone()) {
