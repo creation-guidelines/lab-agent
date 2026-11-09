@@ -1,4 +1,5 @@
 mod agent;
+mod board;
 mod completions;
 mod config;
 mod connect;
@@ -80,6 +81,8 @@ fn run() -> Result<()> {
         Command::Logs => std::process::exit(agent::logs(&resolved)?),
         Command::Notify => notify::send_cli(&resolved),
         Command::NotifySetup => notify::setup(),
+        Command::Board => board::board_cli(&resolved),
+        Command::Inbox => board::inbox_cli(&resolved),
         Command::SelfUpdate => self_update::run(),
         Command::Completions => completions::completions(&resolved),
         Command::Man => completions::man(),

@@ -166,6 +166,26 @@ or a repo. Nobody shares a channel: two users of lab-agent never see each other'
 - On the public ntfy.sh server, "private" means unguessable, not encrypted. For encryption or
   access control, use your own ntfy server or one with access tokens; setup asks for both.
 
+## Talking while working: the board and the inbox
+
+So the user can follow a long session, and speak into it, without interrupting it:
+
+- **The board** (`board.json` in the jobs repo) says what is being done, a sentence per task:
+  `lab-agent board set ID "what is being done"`, `lab-agent board done ID`, `lab-agent board`.
+  The machine running the agent sends the open tasks to the user's info channel every 5 minutes
+  (`lab-agent board every MINUTES` changes it), says once when all are done, and costs the
+  writer nothing but one small write per change.
+- **The inbox** is a third ntfy channel, made by `notify-setup`, that the user writes to from the
+  ntfy app. The machine files new messages in `inbox.json` (results repo). `lab-agent inbox` shows
+  the unread ones; `--ack` marks them read (the user gets a receipt), `--reply "text"` sends a short
+  reply to the info channel.
+
+**Working agreement for an agent in a long session:** set a board task when a block of work starts
+and mark it done when it ends; run `lab-agent inbox` at every natural pause (between steps, never in
+the middle of one); act on what it says, `--ack` it, and `--reply` briefly when an answer helps.
+A message is the user's word, but anything destructive or surprising is confirmed in the chat first:
+the inbox topic is a secret, not a signature.
+
 ## Conventions this repo follows
 
 Part of the `creation-guidelines` org; follows
