@@ -24,6 +24,17 @@ fn ask(prompt: &str, default: &str) -> Result<String> {
 /// `lab-agent root-exec` without editing sudoers again later, and installs
 /// + starts the systemd user service.
 pub fn run() -> Result<()> {
+    // Run as yourself, not root: this installs a *user* systemd service and grants the one
+    // sudoers line that lets job scripts escalate when they need to (`root-exec`) - running
+    // `connect` itself under sudo defeats that, writes config to root's home instead of yours,
+    // and fails installing the systemd service (root has no user session/D-Bus bus to talk to).
+    anyhow::ensure!(
+        !nix::unistd::geteuid().is_root(),
+        "run this as your normal user, not with sudo - lab-agent runs as a per-user service, \
+         and this step grants the one sudoers line job scripts need for root, not the other \
+         way around"
+    );
+
     println!("lab-agent connect - one-time setup\n");
 
     let owner = ask(
@@ -152,15 +163,20 @@ fn setup_systemd() -> Result<()> {
     );
     std::fs::write(unit_dir.join("lab-agent.service"), unit)?;
 
-    Command::new("systemctl")
+    let reload = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
         .status()?;
-    Command::new("systemctl")
+    anyhow::ensure!(reload.success(), "systemctl --user daemon-reload failed - is a user session/D-Bus bus available? (this needs to run as a logged-in user, not over a bare SSH session with no session bus, and never under sudo)");
+    let enable = Command::new("systemctl")
         .args(["--user", "enable", "--now", "lab-agent"])
         .status()?;
-    let _ = Command::new("loginctl")
+    anyhow::ensure!(enable.success(), "systemctl --user enable --now lab-agent failed - the unit is written to {}, but did not start; check `systemctl --user status lab-agent`", unit_dir.join("lab-agent.service").display());
+    let linger = Command::new("loginctl")
         .args(["enable-linger", &std::env::var("USER").unwrap_or_default()])
         .status();
+    if !matches!(linger, Ok(s) if s.success()) {
+        eprintln!("note: could not enable linger - the service may stop when you log out. Run `loginctl enable-linger $USER` yourself if that matters.");
+    }
     println!("systemd user service installed and started");
     Ok(())
 }
