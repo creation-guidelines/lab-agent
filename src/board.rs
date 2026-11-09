@@ -270,14 +270,18 @@ pub fn parse_inbox(bytes: &[u8]) -> Inbox {
 
 /// Reads the board, applies `change`, writes it back; on a conflict (someone wrote in between)
 /// reads again and re-applies.
-fn update_board(client: &Client, cfg: &Config, change: impl Fn(&mut Board)) -> Result<Board> {
+fn update_board(
+    client: &Client,
+    cfg: &Config,
+    change: impl Fn(&mut Board) -> Result<()>,
+) -> Result<Board> {
     for _ in 0..3 {
         let current = client.get_file(&cfg.owner, &cfg.jobs_repo, BOARD_PATH, &cfg.jobs_branch)?;
         let (mut board, sha) = match current {
             Some(f) => (parse_board(&f.content), Some(f.sha)),
             None => (Board::default(), None),
         };
-        change(&mut board);
+        change(&mut board)?; // a change that cannot apply writes nothing
         let body = serde_json::to_vec_pretty(&board)?;
         match client.put_file(
             &cfg.owner,
@@ -317,15 +321,8 @@ pub fn board_cli(resolved: &Resolution) -> Result<()> {
         let (cfg, client) = client()?;
         let id = Contract::BOARD_ID.get_from_or_default(resolved);
         let text = Contract::BOARD_TEXT.get_from_or_default(resolved);
-        apply(
-            &mut Board::default(),
-            &action,
-            id.as_deref(),
-            text.as_deref(),
-            now(),
-        )?; // check the arguments before touching the network
         update_board(&client, &cfg, |b| {
-            let _ = apply(b, &action, id.as_deref(), text.as_deref(), now());
+            apply(b, &action, id.as_deref(), text.as_deref(), now())
         })?
     };
     if json {
@@ -414,6 +411,7 @@ pub fn inbox_cli(resolved: &Resolution) -> Result<()> {
                 let keep = b.replies.len().saturating_sub(20);
                 b.replies.drain(..keep);
             }
+            Ok(())
         })?;
         if ack && last.is_some() {
             eprintln!("marked read; the user gets a receipt");
@@ -521,5 +519,26 @@ mod tests {
     fn an_old_task_without_a_state_is_ongoing() {
         let b = parse_board(br#"{"tasks":[{"id":"a","text":"t","since":1.0}]}"#);
         assert_eq!(b.tasks[0].state, State::Ongoing);
+    }
+
+    #[test]
+    fn a_change_to_an_existing_task_applies_to_the_board_it_was_made_on() {
+        // The bug this pins: the CLI checked each change against an empty board first, so every
+        // wait/pause/resume/done failed with "no task" and silently changed nothing.
+        let mut b = Board::default();
+        apply(&mut b, "set", Some("tui"), Some("the live board"), 0.0).unwrap();
+        for (action, want) in [
+            ("wait", State::Waiting),
+            ("pause", State::Paused),
+            ("resume", State::Ongoing),
+            ("done", State::Done),
+        ] {
+            apply(&mut b, action, Some("tui"), None, 1.0).unwrap();
+            assert_eq!(b.tasks[0].state, want, "{action}");
+        }
+        assert!(
+            apply(&mut Board::default(), "done", Some("tui"), None, 1.0).is_err(),
+            "a missing task is an error, not a silent no-op"
+        );
     }
 }
