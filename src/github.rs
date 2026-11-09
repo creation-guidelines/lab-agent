@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 /// client, kept simple on purpose.
 pub struct Client {
     token: String,
-    /// The API root: https://api.github.com, or a GitHub Enterprise server's.
+    /// The API root: <https://api.github.com>, or a GitHub Enterprise server's.
     base: String,
     agent: ureq::Agent,
 }
