@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::github::Client;
+use crate::github::{Client, Listed, RateLimited};
 use crate::job::{self, Mode};
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -44,6 +44,18 @@ impl Pending {
     fn name(&self) -> &str {
         self.file.trim_end_matches(".sh")
     }
+}
+
+/// What one poll remembers for the next, so that an idle poll costs nothing.
+#[derive(Default)]
+struct PollState {
+    /// The ETag of the last listing of the jobs directory: GitHub answers "not modified" for free.
+    etag: Option<String>,
+    /// That listing, reused when nothing changed.
+    names: Vec<String>,
+    /// Jobs found but not started because the agent was full, with their scripts, so waiting for
+    /// room costs no requests either.
+    waiting: HashMap<String, Pending>,
 }
 
 /// What to do with the jobs waiting right now.
@@ -123,11 +135,23 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
         claimed.len()
     );
 
+    let mut state = PollState::default();
     loop {
-        if let Err(e) = poll_once(&shared, &mut claimed, &state_dir) {
-            eprintln!("lab-agent: poll error (will retry): {e:#}");
-        }
-        std::thread::sleep(Duration::from_secs(cfg.poll_seconds));
+        let pause = match poll_once(&shared, &mut claimed, &state_dir, &mut state) {
+            Ok(()) => Duration::from_secs(cfg.poll_seconds),
+            // A spent budget is not a transient error: asking again only spends the next hour's too.
+            Err(e) => match e.downcast_ref::<RateLimited>() {
+                Some(limited) => {
+                    eprintln!("lab-agent: {limited}; not polling until then");
+                    limited.wait().min(Duration::from_secs(3600))
+                }
+                None => {
+                    eprintln!("lab-agent: poll error (will retry): {e:#}");
+                    Duration::from_secs(cfg.poll_seconds)
+                }
+            },
+        };
+        std::thread::sleep(pause);
     }
 }
 
@@ -161,12 +185,39 @@ fn already_handled(shared: &Shared) -> Result<HashSet<String>> {
     Ok(dirs.into_iter().collect())
 }
 
-fn poll_once(shared: &Arc<Shared>, claimed: &mut HashSet<String>, state_dir: &Path) -> Result<()> {
+fn poll_once(
+    shared: &Arc<Shared>,
+    claimed: &mut HashSet<String>,
+    state_dir: &Path,
+    state: &mut PollState,
+) -> Result<()> {
     let cfg = &shared.cfg;
-    let mut files = shared
-        .client
-        .list_dir(&cfg.owner, &cfg.jobs_repo, "jobs", &cfg.jobs_branch)?;
-    files.retain(|f| f.ends_with(".sh") && !claimed.contains(f.trim_end_matches(".sh")));
+    match shared.client.list_dir_cond(
+        &cfg.owner,
+        &cfg.jobs_repo,
+        "jobs",
+        &cfg.jobs_branch,
+        state.etag.as_deref(),
+    )? {
+        Listed::Changed { names, etag } => {
+            state.etag = etag;
+            state.names = names;
+        }
+        Listed::Unchanged => {}
+        Listed::Missing => {
+            state.etag = None;
+            state.names.clear();
+        }
+    }
+    let names = &state.names;
+    state.waiting.retain(|file, _| names.contains(file));
+
+    let mut files: Vec<String> = state
+        .names
+        .iter()
+        .filter(|f| f.ends_with(".sh") && !claimed.contains(f.trim_end_matches(".sh")))
+        .cloned()
+        .collect();
     files.sort(); // job filenames are numbered, so this is run order
     if files.is_empty() {
         return Ok(());
@@ -174,6 +225,10 @@ fn poll_once(shared: &Arc<Shared>, claimed: &mut HashSet<String>, state_dir: &Pa
 
     let mut pending = Vec::new();
     for file in files {
+        if let Some(waiting) = state.waiting.remove(&file) {
+            pending.push(waiting);
+            continue;
+        }
         let path = format!("jobs/{file}");
         let Some(f) =
             shared
@@ -200,10 +255,15 @@ fn poll_once(shared: &Arc<Shared>, claimed: &mut HashSet<String>, state_dir: &Pa
             flag.store(true, Ordering::SeqCst);
         }
     }
-    for i in plan.start {
+    for &i in &plan.start {
         let p = &pending[i];
         claimed.insert(p.name().to_string());
         spawn(shared, p, state_dir);
+    }
+    for (i, p) in pending.into_iter().enumerate() {
+        if !plan.start.contains(&i) {
+            state.waiting.insert(p.file.clone(), p);
+        }
     }
     Ok(())
 }
@@ -291,19 +351,33 @@ fn run_one(
 /// usually another commit landing a moment earlier.
 fn with_retry<T>(shared: &Shared, what: &str, f: impl Fn() -> Result<T>) -> Result<T> {
     let _only_writer = lock(&shared.push_lock);
-    let mut last = None;
-    for attempt in 0..4u64 {
+    let (mut attempt, mut limit_waits) = (0u64, 0);
+    loop {
         match f() {
             Ok(v) => return Ok(v),
             Err(e) => {
-                last = Some(e);
-                std::thread::sleep(Duration::from_millis(400 * (attempt + 1)));
+                // A result must not be lost because the hourly budget ran out: wait for it to
+                // return (a couple of times at most) without using up an attempt.
+                if let Some(limited) = e.downcast_ref::<RateLimited>() {
+                    if limit_waits < 2 {
+                        limit_waits += 1;
+                        let wait = limited.wait().min(Duration::from_secs(3900));
+                        eprintln!(
+                            "lab-agent: {what}: {limited}; waiting {}s to push it",
+                            wait.as_secs()
+                        );
+                        std::thread::sleep(wait);
+                        continue;
+                    }
+                }
+                attempt += 1;
+                if attempt >= 4 {
+                    return Err(e.context(format!("pushing {what}")));
+                }
+                std::thread::sleep(Duration::from_millis(400 * attempt));
             }
         }
     }
-    Err(last
-        .expect("at least one attempt")
-        .context(format!("pushing {what}")))
 }
 
 /// Seconds since the Unix epoch, as a float (fractional seconds), matching how `status.json`

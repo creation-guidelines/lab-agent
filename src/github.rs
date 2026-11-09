@@ -19,6 +19,74 @@ pub struct FileContent {
     pub sha: String,
 }
 
+/// GitHub refused because the hourly request budget is spent. The budget is per *user*: every
+/// token of the same user draws on it, so a busy session elsewhere can starve this program.
+#[derive(Debug)]
+pub struct RateLimited {
+    /// Unix time at which the budget returns.
+    pub reset: u64,
+}
+
+impl RateLimited {
+    /// How long to wait for the budget to return (a couple of seconds of slack).
+    pub fn wait(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.reset.saturating_sub(unix_now()) + 2)
+    }
+}
+
+impl std::fmt::Display for RateLimited {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "GitHub's hourly API budget is used up (it is per user, shared by every token); it returns in {} min",
+            self.wait().as_secs().div_ceil(60)
+        )
+    }
+}
+
+impl std::error::Error for RateLimited {}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
+/// An HTTP failure as an error: a spent budget becomes [`RateLimited`] (so callers can wait for
+/// it instead of retrying into a wall); anything else keeps GitHub's own status text.
+fn fail(what: &str, e: ureq::Error) -> anyhow::Error {
+    if let ureq::Error::Status(code, resp) = &e {
+        let spent = resp.header("x-ratelimit-remaining") == Some("0")
+            || resp.header("retry-after").is_some();
+        if matches!(*code, 403 | 429) && spent {
+            let retry_after = resp
+                .header("retry-after")
+                .and_then(|v| v.parse::<u64>().ok());
+            let reset = resp
+                .header("x-ratelimit-reset")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or_else(|| unix_now() + retry_after.unwrap_or(60));
+            return anyhow::Error::new(RateLimited { reset });
+        }
+    }
+    anyhow!("{what}: {e}")
+}
+
+/// The answer to a conditional directory listing.
+#[derive(Debug)]
+pub enum Listed {
+    /// There is no such directory.
+    Missing,
+    /// It is the same as when the ETag was issued.
+    Unchanged,
+    /// It is new, or changed; `etag` is for the next conditional listing.
+    Changed {
+        names: Vec<String>,
+        etag: Option<String>,
+    },
+}
+
 /// The answer to a conditional read.
 #[derive(Debug)]
 pub enum Fetched {
@@ -64,7 +132,7 @@ impl Client {
         match self.auth(self.agent.get(&url)).call() {
             Ok(_) => Ok(true),
             Err(ureq::Error::Status(404, _)) => Ok(false),
-            Err(e) => Err(anyhow!("checking repo {owner}/{repo}: {e}")),
+            Err(e) => Err(fail(&format!("checking repo {owner}/{repo}"), e)),
         }
     }
 
@@ -77,14 +145,17 @@ impl Client {
             self.api(&format!("/orgs/{owner}/repos"))
         };
         let body = json!({ "name": repo, "private": private, "auto_init": true });
-        self.auth(self.agent.post(&url)).send_json(body)?;
+        self.auth(self.agent.post(&url))
+            .send_json(body)
+            .map_err(|e| fail("writing to GitHub", e))?;
         Ok(())
     }
 
     fn whoami(&self) -> Result<String> {
         let resp: Value = self
             .auth(self.agent.get(&self.api("/user")))
-            .call()?
+            .call()
+            .map_err(|e| fail("calling GitHub", e))?
             .into_json()?;
         Ok(resp["login"].as_str().unwrap_or_default().to_string())
     }
@@ -136,7 +207,7 @@ impl Client {
             }
             Err(ureq::Error::Status(304, _)) => Ok(Fetched::Unchanged),
             Err(ureq::Error::Status(404, _)) => Ok(Fetched::Missing),
-            Err(e) => Err(anyhow!("reading {owner}/{repo}:{path}@{ref}: {e}")),
+            Err(e) => Err(fail(&format!("reading {owner}/{repo}:{path}@{ref}"), e)),
         }
     }
 
@@ -148,9 +219,32 @@ impl Client {
         path: &str,
         r#ref: &str,
     ) -> Result<Vec<String>> {
+        match self.list_dir_cond(owner, repo, path, r#ref, None)? {
+            Listed::Changed { names, .. } => Ok(names),
+            Listed::Missing | Listed::Unchanged => Ok(vec![]),
+        }
+    }
+
+    /// [`Client::list_dir`] with an ETag from an earlier listing: when nothing changed GitHub
+    /// answers 304 and the request is free against the rate limit, so a daemon can poll all day
+    /// without spending the budget it shares with everything else the user does on GitHub.
+    pub fn list_dir_cond(
+        &self,
+        owner: &str,
+        repo: &str,
+        path: &str,
+        r#ref: &str,
+        etag: Option<&str>,
+    ) -> Result<Listed> {
         let url = self.api(&format!("/repos/{owner}/{repo}/contents/{path}?ref={ref}"));
-        match self.auth(self.agent.get(&url)).call() {
+        let mut req = self.auth(self.agent.get(&url));
+        if let Some(tag) = etag {
+            req = req.set("If-None-Match", tag);
+        }
+        match req.call() {
+            Ok(resp) if resp.status() == 304 => Ok(Listed::Unchanged),
             Ok(resp) => {
+                let etag = resp.header("ETag").map(str::to_string);
                 let v: Value = resp.into_json()?;
                 let names = v
                     .as_array()
@@ -160,10 +254,10 @@ impl Client {
                             .collect()
                     })
                     .unwrap_or_default();
-                Ok(names)
+                Ok(Listed::Changed { names, etag })
             }
-            Err(ureq::Error::Status(404, _)) => Ok(vec![]),
-            Err(e) => Err(anyhow!("listing {owner}/{repo}:{path}@{ref}: {e}")),
+            Err(ureq::Error::Status(404, _)) => Ok(Listed::Missing),
+            Err(e) => Err(fail(&format!("listing {owner}/{repo}:{path}@{ref}"), e)),
         }
     }
 
@@ -191,7 +285,8 @@ impl Client {
         }
         let resp: Value = self
             .auth(self.agent.put(&url))
-            .send_json(body)?
+            .send_json(body)
+            .map_err(|e| fail("writing to GitHub", e))?
             .into_json()?;
         Ok(resp["content"]["sha"]
             .as_str()
@@ -259,6 +354,60 @@ mod tests {
                 assert_eq!(file.content, b"hi");
                 assert_eq!(file.sha, "s1");
                 assert_eq!(etag.as_deref(), Some("\"v1\""));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_spent_budget_is_a_rate_limit_with_its_reset_time() {
+        let client = serve(vec![json(
+            "403 Forbidden",
+            "{\"message\":\"API rate limit exceeded\"}",
+            "x-ratelimit-remaining: 0\r\nx-ratelimit-reset: 4102444800\r\n",
+        )]);
+        let err = client
+            .get_file_cond("o", "r", "p", "main", None)
+            .unwrap_err();
+        let limited = err
+            .downcast_ref::<RateLimited>()
+            .expect("a RateLimited error");
+        assert_eq!(limited.reset, 4_102_444_800);
+    }
+
+    #[test]
+    fn a_403_with_budget_left_is_just_an_error() {
+        let client = serve(vec![json(
+            "403 Forbidden",
+            "{\"message\":\"Resource not accessible\"}",
+            "x-ratelimit-remaining: 4999\r\n",
+        )]);
+        let err = client
+            .get_file_cond("o", "r", "p", "main", None)
+            .unwrap_err();
+        assert!(err.downcast_ref::<RateLimited>().is_none(), "{err:#}");
+    }
+
+    #[test]
+    fn an_unchanged_listing_is_free() {
+        let client = serve(vec![json("304 Not Modified", "", "ETag: \"d1\"\r\n")]);
+        let got = client
+            .list_dir_cond("o", "r", "jobs", "main", Some("\"d1\""))
+            .unwrap();
+        assert!(matches!(got, Listed::Unchanged), "{got:?}");
+    }
+
+    #[test]
+    fn a_changed_listing_has_names_and_an_etag() {
+        let body = "[{\"name\":\"1-a.sh\"},{\"name\":\"archive\"}]";
+        let client = serve(vec![json("200 OK", body, "ETag: \"d2\"\r\n")]);
+        match client
+            .list_dir_cond("o", "r", "jobs", "main", None)
+            .unwrap()
+        {
+            Listed::Changed { names, etag } => {
+                assert_eq!(names, vec!["1-a.sh", "archive"]);
+                assert_eq!(etag.as_deref(), Some("\"d2\""));
             }
             other => panic!("{other:?}"),
         }

@@ -14,7 +14,28 @@ use anyhow::{bail, Result};
 use argenv_resolve::*;
 use contract::{Command, Contract};
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        // A spent GitHub budget is an expected state, not a crash: say so plainly, with a status
+        // callers can act on, instead of a stack of error text.
+        let limited = e.downcast_ref::<github::RateLimited>().is_some();
+        eprintln!(
+            "{}",
+            if limited {
+                format!("lab-agent: {e:#}")
+            } else {
+                format!("Error: {e:?}")
+            }
+        );
+        std::process::exit(if limited {
+            agent::exit::RATE_LIMITED
+        } else {
+            1
+        });
+    }
+}
+
+fn run() -> Result<()> {
     let argv: Vec<String> = std::env::args().collect();
     let sub = argv.get(1).map(String::as_str).unwrap_or("");
 
