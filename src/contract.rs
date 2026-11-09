@@ -172,7 +172,7 @@ contract! {
         key:         "remote",
         ty:          Type::Bool,
         default:     Some(false),
-        subcommands: &[Command::Monitor, Command::Jobs],
+        subcommands: &[Command::Monitor, Command::Jobs, Command::Board],
         env:         Some(Env::new("LAB_AGENT_REMOTE")),
         arg:         Some(Arg { negatable: false, ..Arg::long("remote") }),
         summary:     "Read from GitHub even on the machine that runs the agent (default there: local state)",
@@ -333,10 +333,10 @@ contract! {
     BOARD_ACTION: String, Command = Input {
         key:         "action",
         ty:          Type::Enum,
-        allowed:     &["show", "set", "done", "every", "clear"],
+        allowed:     &["show", "set", "wait", "pause", "resume", "done", "every", "clear"],
         subcommands: &[Command::Board],
         arg:         Some(Arg { value_name: "ACTION", ..Arg::positional(0) }),
-        summary:     "show (default), set, done, every, clear",
+        summary:     "show, set, wait, pause, resume, done, every, clear (none: a live view)",
         ..Input::EMPTY
     };
 
