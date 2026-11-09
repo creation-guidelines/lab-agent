@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.8]
+
+
+### Bug Fixes
+- Idle polling costs nothing, and a spent GitHub budget is waited out instead of losing a result ([#28](https://github.com/creation-guidelines/lab-agent/pull/28)) ([4642e9f])
+
+
+
 ## [0.1.7]
 
 
