@@ -89,8 +89,10 @@ from `--mode` / `--timeout`:
 
 - `queue` (default): runs when there is room under the agent's `max_parallel`.
 - `preempt`: cancels the jobs running at that moment, then runs first.
-- `timeout`: seconds; when it expires the job's **whole process group** is killed, not just the
-  script, so a stuck child cannot hold the agent.
+- `timeout`: seconds; when it expires the job's **whole process group** gets SIGTERM, then 10
+  seconds to clean up (`trap 'umount ...; rm ...' TERM`), then SIGKILL for whatever is left - so a
+  stuck child cannot hold the agent, and a job that mounted something can put it back. Preemption
+  stops a job the same way. A job that mounts or attaches anything should install such a trap.
 
 **Exit statuses** of `wait` and `submit --wait`:
 

@@ -60,9 +60,10 @@ echo "hello from real hardware"
 - `mode=queue` (default) — runs after everything already queued.
 - `mode=preempt` — kills whatever is currently running (the whole process group, not just the
   top-level script) and jumps the queue. For "stop what you're doing, do this now."
-- `timeout=N` — seconds before the job's whole process group is killed. Enforced on the group,
-  not just the immediate child, so a hung subprocess (e.g. a `fastboot reboot` that never
-  returns) can't wedge the agent the way it would a naive `Child::kill()`.
+- `timeout=N` — seconds before the job's whole process group is stopped: SIGTERM, then 10 seconds
+  to clean up (`trap ... TERM`), then SIGKILL. Enforced on the group, not just the immediate
+  child, so a hung subprocess (e.g. a `fastboot reboot` that never returns) can't wedge the agent
+  the way it would a naive `Child::kill()`.
 
 Results land in the results repo, one directory per job:
 
