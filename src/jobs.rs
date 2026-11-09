@@ -1,6 +1,6 @@
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::contract::Contract;
-use crate::github::Client;
+use crate::github::{Client, Fetched, Listed};
 use anyhow::Result;
 use argenv_resolve::*;
 use serde::Serialize;
@@ -45,7 +45,7 @@ fn now_unix() -> f64 {
         .as_secs_f64()
 }
 
-pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
+pub fn run(resolved: &Resolution) -> Result<()> {
     let count = Contract::JOBS_COUNT
         .get_from_or_default(resolved)
         .unwrap_or(20);
@@ -53,8 +53,18 @@ pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
         .get_from_or_default(resolved)
         .unwrap_or(false);
 
-    let client = Client::new(token);
-    let rows = fetch_jobs(&client, &cfg, count as usize)?;
+    let rows = match source(resolved) {
+        Source::Local(dir) => {
+            if !json {
+                eprintln!("(this machine's own state; --remote reads GitHub)");
+            }
+            local_rows(&dir, count as usize)
+        }
+        Source::Remote => {
+            let (cfg, client) = (config::load()?, Client::new(config::load_token()?));
+            fetch_jobs(&client, &cfg, count as usize)?
+        }
+    };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -97,24 +107,145 @@ pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
     Ok(())
 }
 
+/// Where job state is read from.
+pub enum Source {
+    /// This machine's own state directory: no network, no token, and it works while GitHub is
+    /// unreachable or refusing.
+    Local(std::path::PathBuf),
+    /// The results repo on GitHub: the way for anything that is not the machine running the agent.
+    Remote,
+}
+
+/// Local state when this machine runs the agent (its state directory holds job records), unless
+/// `--remote` asks for GitHub.
+pub fn source(resolved: &Resolution) -> Source {
+    let dir = crate::daemon::state_dir();
+    let remote = Contract::REMOTE
+        .get_from_or_default(resolved)
+        .unwrap_or(false);
+    if remote || !has_local_state(&dir) {
+        Source::Remote
+    } else {
+        Source::Local(dir)
+    }
+}
+
+fn is_record(name: &str) -> bool {
+    name.ends_with(".status.json")
+}
+
+pub fn has_local_state(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_str().is_some_and(is_record))
+        })
+        .unwrap_or(false)
+}
+
+/// The `count` newest jobs the agent on this machine has recorded, newest first.
+pub fn local_rows(dir: &std::path::Path, count: usize) -> Vec<JobRow> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".status.json")
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    names.reverse();
+    names.truncate(count);
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let bytes = std::fs::read(dir.join(format!("{name}.status.json"))).ok()?;
+            let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            Some(row_from_status(name, &v))
+        })
+        .collect()
+}
+
 /// Lists the `count` most recent jobs from the results repo with their status and timestamps.
 /// Shared by the `jobs` subcommand and the `monitor` TUI, so both show the same data the same
 /// way.
 pub fn fetch_jobs(client: &Client, cfg: &Config, count: usize) -> Result<Vec<JobRow>> {
-    let mut job_dirs =
-        client.list_dir(&cfg.owner, &cfg.results_repo, "jobs", &cfg.results_branch)?;
-    job_dirs.sort();
-    job_dirs.reverse(); // newest first (job names are numbered)
-    job_dirs.truncate(count);
+    fetch_jobs_cached(client, cfg, count, &mut JobsCache::default())
+}
+
+/// What a long-lived view (the monitor) remembers between refreshes. Every read is conditional: a
+/// file that has not changed is answered "not modified", which GitHub does not count against the
+/// hourly budget. A finished job never changes, so after the first load almost every refresh is
+/// free - without this, a monitor re-reading 30 jobs every few seconds spends the whole budget
+/// (shared with everything else the user does on GitHub) in minutes.
+#[derive(Default)]
+pub struct JobsCache {
+    list_etag: Option<String>,
+    names: Vec<String>,
+    rows: std::collections::HashMap<String, (Option<String>, JobRow)>,
+}
+
+/// The `count` most recent jobs, newest first, reading only what changed since `cache` was filled.
+pub fn fetch_jobs_cached(
+    client: &Client,
+    cfg: &Config,
+    count: usize,
+    cache: &mut JobsCache,
+) -> Result<Vec<JobRow>> {
+    match client.list_dir_cond(
+        &cfg.owner,
+        &cfg.results_repo,
+        "jobs",
+        &cfg.results_branch,
+        cache.list_etag.as_deref(),
+    )? {
+        Listed::Changed { names, etag } => {
+            cache.list_etag = etag;
+            cache.names = names;
+        }
+        Listed::Unchanged => {}
+        Listed::Missing => {
+            cache.list_etag = None;
+            cache.names.clear();
+        }
+    }
+    let mut names = cache.names.clone();
+    names.sort();
+    names.reverse(); // newest first (job names start with a time)
+    names.truncate(count);
 
     let mut rows = Vec::new();
-    for name in job_dirs {
+    for name in names {
         let path = format!("jobs/{name}/status.json");
-        if let Some(f) =
-            client.get_file(&cfg.owner, &cfg.results_repo, &path, &cfg.results_branch)?
-        {
-            let v: serde_json::Value = serde_json::from_slice(&f.content).unwrap_or_default();
-            rows.push(row_from_status(name, &v));
+        let tag = cache.rows.get(&name).and_then(|(tag, _)| tag.clone());
+        match client.get_file_cond(
+            &cfg.owner,
+            &cfg.results_repo,
+            &path,
+            &cfg.results_branch,
+            tag.as_deref(),
+        )? {
+            Fetched::Changed { file, etag } => {
+                let v: serde_json::Value =
+                    serde_json::from_slice(&file.content).unwrap_or_default();
+                let row = row_from_status(name.clone(), &v);
+                cache.rows.insert(name, (etag, row.clone()));
+                rows.push(row);
+            }
+            Fetched::Unchanged => {
+                if let Some((_, row)) = cache.rows.get(&name) {
+                    // Staleness depends on the clock, not on the file: recompute it.
+                    let mut row = row.clone();
+                    row.stale = is_stale(&row, now_unix());
+                    rows.push(row);
+                }
+            }
+            Fetched::Missing => {}
         }
     }
     Ok(rows)
@@ -225,5 +356,102 @@ mod tests {
         let mut r = row("running", Some(0.0), Some(1));
         r.stale = true;
         assert_eq!(r.display_status(), "stale");
+    }
+
+    use base64::Engine as _;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    /// A fake GitHub with two finished jobs. It records every request and whether it was
+    /// conditional (carried If-None-Match), and answers a conditional one with 304.
+    fn fake_github(seen: Arc<Mutex<Vec<(String, bool)>>>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let path = head
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .split(' ')
+                    .nth(1)
+                    .unwrap_or("")
+                    .to_string();
+                let conditional = head
+                    .lines()
+                    .any(|l| l.to_ascii_lowercase().starts_with("if-none-match:"));
+                seen.lock().unwrap().push((path.clone(), conditional));
+                let reply = if conditional {
+                    "HTTP/1.1 304 Not Modified\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string()
+                } else {
+                    let body = if path.contains("/status.json") {
+                        let status = r#"{"status":"ok","exit_code":0,"started_at":100.0,"finished_at":105.0,"timeout":60}"#;
+                        format!(
+                            r#"{{"content":"{}","sha":"s"}}"#,
+                            base64::engine::general_purpose::STANDARD.encode(status)
+                        )
+                    } else {
+                        r#"[{"name":"1000-a"},{"name":"2000-b"}]"#.to_string()
+                    };
+                    format!(
+                        "HTTP/1.1 200 OK\r\nETag: \"tag\"\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                };
+                stream.write_all(reply.as_bytes()).ok();
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    fn test_config() -> Config {
+        Config {
+            owner: "o".into(),
+            jobs_repo: "j".into(),
+            results_repo: "r".into(),
+            jobs_branch: "main".into(),
+            results_branch: "results".into(),
+            max_parallel: 1,
+            poll_seconds: 5,
+        }
+    }
+
+    #[test]
+    fn a_refresh_with_nothing_new_is_all_conditional_and_still_returns_the_rows() {
+        // The property that keeps a monitor from spending GitHub's hourly budget: a 304 is free.
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::with_base("token".into(), &fake_github(seen.clone()));
+        let mut cache = JobsCache::default();
+
+        let first = fetch_jobs_cached(&client, &test_config(), 30, &mut cache).unwrap();
+        assert_eq!(
+            first.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            ["2000-b", "1000-a"]
+        );
+        let after_first = seen.lock().unwrap().len();
+        assert!(
+            seen.lock()
+                .unwrap()
+                .iter()
+                .all(|(_, conditional)| !conditional),
+            "nothing to be conditional on yet"
+        );
+
+        let second = fetch_jobs_cached(&client, &test_config(), 30, &mut cache).unwrap();
+        let calls = seen.lock().unwrap()[after_first..].to_vec();
+        assert_eq!(calls.len(), 3, "the listing and two statuses");
+        assert!(
+            calls.iter().all(|(_, conditional)| *conditional),
+            "every re-read must be conditional: {calls:?}"
+        );
+        assert_eq!(second.len(), 2);
+        assert_eq!(second[0].status, "ok");
+        assert_eq!(second[0].timeout_secs, Some(60));
     }
 }

@@ -95,6 +95,13 @@ The job's exit status is the command's exit status (`124` timeout, `125` cancell
 running). The full contract - ids, JSON shapes, exit statuses, rules - is in
 [AGENTS.md](AGENTS.md#the-agent-api-using-lab-agent-from-another-program).
 
+## Watching jobs
+
+`lab-agent monitor` is a live table of jobs; `lab-agent jobs [-n N] [--json]` prints the same once.
+On the machine that runs the agent they read its own records (instant, no network, works when
+GitHub is unreachable); anywhere else they read the results repo on GitHub, and `--remote` forces
+that on the machine too. A `running` job that has outlived its limit is shown as `stale`.
+
 ## Running things as root
 
 Job scripts that need root don't get a sudoers line per command. `connect` grants exactly one,

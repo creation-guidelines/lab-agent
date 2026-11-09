@@ -140,6 +140,18 @@ contract! {
         ..Input::EMPTY
     };
 
+    /// Read job state from GitHub even on the machine that runs the agent.
+    REMOTE: bool, Command = Input {
+        key:         "remote",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Monitor, Command::Jobs],
+        env:         Some(Env::new("LAB_AGENT_REMOTE")),
+        arg:         Some(Arg { negatable: false, ..Arg::long("remote") }),
+        summary:     "Read from GitHub even on the machine that runs the agent (default there: local state)",
+        ..Input::EMPTY
+    };
+
     /// The script `submit` pushes (`-` or nothing: standard input).
     SUBMIT_FILE: String, Command = Input {
         key:         "file",
@@ -374,5 +386,13 @@ mod tests {
     fn a_bad_mode_is_a_finding() {
         let r = resolve(&["submit", "--mode", "sideways"]);
         assert!(!lint(&Contract::records(), &r).is_empty());
+    }
+
+    #[test]
+    fn remote_belongs_to_monitor_and_jobs_only() {
+        let ok = resolve(&["monitor", "--remote"]);
+        assert!(lint(&Contract::records(), &ok).is_empty());
+        assert_eq!(Contract::REMOTE.get_from_or_default(&ok), Some(true));
+        assert!(!lint(&Contract::records(), &resolve(&["connect", "--remote"])).is_empty());
     }
 }
