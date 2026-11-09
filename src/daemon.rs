@@ -32,6 +32,61 @@ pub(crate) fn parse_header(script: &str) -> (Mode, Duration) {
     (mode, timeout)
 }
 
+/// Whether the job's `# lab:` header asks for a phone notification of how it ended.
+pub(crate) fn wants_notify(script: &str) -> bool {
+    script
+        .lines()
+        .find(|l| l.trim_start().starts_with("# lab:"))
+        .is_some_and(|l| {
+            l.split_whitespace()
+                .any(|t| matches!(t, "notify=yes" | "notify=true" | "notify=1"))
+        })
+}
+
+/// Tells the user on the phone how a job that asked for it ended: info if it succeeded, urgent
+/// otherwise, with its last lines. Never fails or delays the job's result.
+fn notify_outcome(job: &str, done: &Done, log: &str) {
+    let Some(cfg) = crate::notify::load() else {
+        return;
+    };
+    let took = crate::jobs::format_duration((done.finished_at - done.started_at).max(0.0));
+    let how = done
+        .exit_code
+        .map_or(done.status.clone(), |c| format!("exit {c}"));
+    let tail: Vec<&str> = log
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .take(6)
+        .collect();
+    let mut body = format!("{how} after {took}");
+    if !tail.is_empty() {
+        body.push_str("\n\n");
+        body.push_str(&tail.into_iter().rev().collect::<Vec<_>>().join("\n"));
+    }
+    let body: String = body.chars().take(900).collect();
+    let level = if done.status == "ok" {
+        crate::notify::Level::Info
+    } else {
+        crate::notify::Level::Urgent
+    };
+    let title = format!("{job}: {}", done.status);
+    if let Err(e) = crate::notify::Notifier::new(cfg).send(level, &title, &body) {
+        eprintln!("lab-agent: {e:#}");
+    }
+}
+
+/// How often a running job's output so far is pushed: often at first, when someone is likely
+/// watching it start, then less and less. GitHub caps content writes at about 500 an hour, and an
+/// hour-long build pushing every 8 seconds would come close on its own.
+fn partial_log_every(running_for: Duration) -> Duration {
+    match running_for.as_secs() {
+        0..=119 => Duration::from_secs(8),
+        120..=599 => Duration::from_secs(30),
+        _ => Duration::from_secs(60),
+    }
+}
+
 /// A job that has been found and not yet started.
 struct Pending {
     file: String,
@@ -360,12 +415,13 @@ fn run_one(
     let done = AtomicBool::new(false);
     let result = std::thread::scope(|scope| {
         scope.spawn(|| {
+            let begun = std::time::Instant::now();
             let tick = Duration::from_millis(400);
             let (mut sent, mut since) = (0, Duration::ZERO);
             while !done.load(Ordering::SeqCst) {
                 std::thread::sleep(tick);
                 since += tick;
-                if since < PARTIAL_LOG_EVERY {
+                if since < partial_log_every(begun.elapsed()) {
                     continue;
                 }
                 since = Duration::ZERO;
@@ -421,6 +477,9 @@ fn run_one(
         let _ = std::fs::remove_file(done_path(state_dir, job_name));
     }
     lock(&shared.in_flight).remove(job_name);
+    if wants_notify(script) {
+        notify_outcome(job_name, &done, &log);
+    }
     pushed
 }
 
@@ -583,8 +642,6 @@ fn push_status(
 const KEEP_LOCAL: usize = 200;
 /// How many of the newest results a starting agent reads to find jobs that were cut off.
 const RECENT_TO_CHECK: usize = 20;
-/// How often a running job's log so far is pushed.
-const PARTIAL_LOG_EVERY: Duration = Duration::from_secs(8);
 /// The contents API serves files up to 1 MB; a longer log keeps its tail.
 const MAX_PUSHED_LOG: usize = 900_000;
 
@@ -838,6 +895,22 @@ mod tests {
         assert!(
             dir.join("1-a.status.json").exists(),
             "an unsent result is never pruned"
+        );
+    }
+
+    #[test]
+    fn output_is_pushed_less_often_the_longer_a_job_runs() {
+        assert_eq!(
+            partial_log_every(Duration::from_secs(10)),
+            Duration::from_secs(8)
+        );
+        assert_eq!(
+            partial_log_every(Duration::from_secs(300)),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            partial_log_every(Duration::from_secs(3600)),
+            Duration::from_secs(60)
         );
     }
 }

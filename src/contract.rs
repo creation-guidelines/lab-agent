@@ -14,6 +14,10 @@ pub const ENV_OWNER: &str = "LAB_AGENT_OWNER";
 pub const ENV_JOBS_REPO: &str = "LAB_AGENT_JOBS_REPO";
 pub const ENV_RESULTS_REPO: &str = "LAB_AGENT_RESULTS_REPO";
 pub const ENV_API_URL: &str = "LAB_AGENT_API_URL";
+pub const ENV_NTFY_SERVER: &str = "LAB_AGENT_NTFY_SERVER";
+pub const ENV_NTFY_INFO_TOPIC: &str = "LAB_AGENT_NTFY_INFO_TOPIC";
+pub const ENV_NTFY_URGENT_TOPIC: &str = "LAB_AGENT_NTFY_URGENT_TOPIC";
+pub const ENV_NTFY_TOKEN: &str = "LAB_AGENT_NTFY_TOKEN";
 
 /// Every subcommand. Inputs scoped to one are checked by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -25,6 +29,8 @@ pub enum Command {
     Submit,
     Wait,
     Logs,
+    Notify,
+    NotifySetup,
     SelfUpdate,
     RootExec,
     Completions,
@@ -40,6 +46,8 @@ impl Command {
         Command::Submit,
         Command::Wait,
         Command::Logs,
+        Command::Notify,
+        Command::NotifySetup,
         Command::SelfUpdate,
         Command::RootExec,
         Command::Completions,
@@ -56,6 +64,8 @@ impl Command {
             Command::Submit => "submit",
             Command::Wait => "wait",
             Command::Logs => "logs",
+            Command::Notify => "notify",
+            Command::NotifySetup => "notify-setup",
             Command::SelfUpdate => "self-update",
             Command::RootExec => "root-exec",
             Command::Completions => "completions",
@@ -75,6 +85,10 @@ impl Command {
             Command::Submit => "Push a script as a job; with --wait, wait and print its output",
             Command::Wait => "Wait for a job to finish: prints its output, exits with its status",
             Command::Logs => "Print a job's output (so far, if it is still running)",
+            Command::Notify => {
+                "Send a notification to your phone: notify [--urgent] [--title T] MESSAGE"
+            }
+            Command::NotifySetup => "Set up your own private phone notification channels (ntfy)",
             Command::SelfUpdate => "Update lab-agent through pacman and restart the service",
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
@@ -221,6 +235,84 @@ contract! {
         subcommands: &[Command::Wait, Command::Logs],
         arg:         Some(Arg { value_name: "JOB", ..Arg::positional(0) }),
         summary:     "The job's id, as `submit` printed it",
+        ..Input::EMPTY
+    };
+
+    /// Tell the user on the phone how the job ended (needs notify-setup on the agent's machine).
+    SUBMIT_NOTIFY: bool, Command = Input {
+        key:         "notify",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { negatable: false, ..Arg::long("notify") }),
+        summary:     "Notify your phone how the job ended (urgent if it failed)",
+        ..Input::EMPTY
+    };
+
+    /// The text to send.
+    NOTIFY_MESSAGE: String, Command = Input {
+        key:         "message",
+        ty:          Type::String,
+        subcommands: &[Command::Notify],
+        arg:         Some(Arg { value_name: "MESSAGE", ..Arg::positional(0) }),
+        summary:     "The text (default: standard input)",
+        ..Input::EMPTY
+    };
+
+    /// Use the urgent channel.
+    NOTIFY_URGENT: bool, Command = Input {
+        key:         "urgent",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Notify],
+        arg:         Some(Arg { negatable: false, ..Arg::long("urgent") }),
+        summary:     "Send on the urgent channel: you are needed",
+        ..Input::EMPTY
+    };
+
+    /// The notification's title.
+    NOTIFY_TITLE: String, Command = Input {
+        key:         "title",
+        ty:          Type::String,
+        subcommands: &[Command::Notify],
+        arg:         Some(Arg { value_name: "TITLE", ..Arg::long("title") }),
+        summary:     "A title (default: lab-agent)",
+        ..Input::EMPTY
+    };
+
+    /// ntfy server for a sender with no notify.toml.
+    NTFY_SERVER: String = Input {
+        key:     "ntfy_server",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_NTFY_SERVER)),
+        summary: "ntfy server for a sender with no notify.toml (default: https://ntfy.sh)",
+        ..Input::EMPTY
+    };
+
+    /// Info topic for a sender with no notify.toml.
+    NTFY_INFO_TOPIC: String = Input {
+        key:     "ntfy_info_topic",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_NTFY_INFO_TOPIC)),
+        summary: "Info channel for a sender with no notify.toml (a secret; never a flag)",
+        ..Input::EMPTY
+    };
+
+    /// Urgent topic for a sender with no notify.toml.
+    NTFY_URGENT_TOPIC: String = Input {
+        key:     "ntfy_urgent_topic",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_NTFY_URGENT_TOPIC)),
+        summary: "Urgent channel for a sender with no notify.toml (a secret; never a flag)",
+        ..Input::EMPTY
+    };
+
+    /// Access token for an ntfy server that needs one.
+    NTFY_TOKEN: String = Input {
+        key:     "ntfy_token",
+        ty:      Type::String,
+        env:     Some(Env::new(ENV_NTFY_TOKEN)),
+        summary: "Access token for an ntfy server that needs one (never a flag)",
         ..Input::EMPTY
     };
 
@@ -394,5 +486,22 @@ mod tests {
         assert!(lint(&Contract::records(), &ok).is_empty());
         assert_eq!(Contract::REMOTE.get_from_or_default(&ok), Some(true));
         assert!(!lint(&Contract::records(), &resolve(&["connect", "--remote"])).is_empty());
+    }
+
+    #[test]
+    fn notify_flags_resolve_and_lint_clean() {
+        let r = resolve(&["notify", "--urgent", "--title", "t", "come and look"]);
+        assert!(lint(&Contract::records(), &r).is_empty());
+        assert_eq!(Contract::NOTIFY_URGENT.get_from_or_default(&r), Some(true));
+        assert_eq!(
+            Contract::NOTIFY_MESSAGE.get_from_or_default(&r),
+            Some("come and look".into())
+        );
+        assert!(lint(
+            &Contract::records(),
+            &resolve(&["submit", "--notify", "x.sh"])
+        )
+        .is_empty());
+        assert!(!lint(&Contract::records(), &resolve(&["jobs", "--urgent"])).is_empty());
     }
 }

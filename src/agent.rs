@@ -79,11 +79,12 @@ fn mode_word(mode: Mode) -> &'static str {
 }
 
 /// The script with exactly one `# lab:` header, after the shebang when there is one.
-fn with_header(script: &str, mode: Mode, timeout: Duration) -> String {
+fn with_header(script: &str, mode: Mode, timeout: Duration, notify: bool) -> String {
     let header = format!(
-        "# lab: mode={} timeout={}",
+        "# lab: mode={} timeout={}{}",
         mode_word(mode),
-        timeout.as_secs()
+        timeout.as_secs(),
+        if notify { " notify=yes" } else { "" }
     );
     let mut lines: Vec<&str> = script
         .lines()
@@ -142,13 +143,17 @@ pub fn submit(resolved: &Resolution) -> Result<i32> {
         })
         .unwrap_or_default();
     let name = format!("{}-{}", unix_secs(), slug(&name_source));
+    let notify = Contract::SUBMIT_NOTIFY
+        .get_from_or_default(resolved)
+        .unwrap_or(false)
+        || daemon::wants_notify(&script);
 
     client.put_file(
         &cfg.owner,
         &cfg.jobs_repo,
         &format!("jobs/{name}.sh"),
         &cfg.jobs_branch,
-        with_header(&script, mode, timeout).as_bytes(),
+        with_header(&script, mode, timeout, notify).as_bytes(),
         &format!("job: {name}"),
         None,
     )?;
@@ -356,13 +361,24 @@ mod tests {
             "#!/bin/sh\n# lab: mode=queue timeout=5\necho hi\n",
             Mode::Preempt,
             Duration::from_secs(90),
+            false,
         );
         assert_eq!(out, "#!/bin/sh\n# lab: mode=preempt timeout=90\necho hi\n");
     }
 
     #[test]
     fn the_header_goes_first_without_a_shebang() {
-        let out = with_header("echo hi", Mode::Queue, Duration::from_secs(300));
+        let out = with_header("echo hi", Mode::Queue, Duration::from_secs(300), false);
         assert_eq!(out, "# lab: mode=queue timeout=300\necho hi\n");
+    }
+
+    #[test]
+    fn notify_is_kept_in_the_header() {
+        let out = with_header("echo hi\n", Mode::Queue, Duration::from_secs(60), true);
+        assert_eq!(out, "# lab: mode=queue timeout=60 notify=yes\necho hi\n");
+        assert!(crate::daemon::wants_notify(&out));
+        assert!(!crate::daemon::wants_notify(
+            "# lab: mode=queue timeout=60\necho"
+        ));
     }
 }
