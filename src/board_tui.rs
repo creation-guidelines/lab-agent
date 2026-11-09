@@ -94,6 +94,8 @@ struct Snapshot {
     board: Board,
     inbox: Inbox,
     jobs: Vec<JobRow>,
+    /// this machine's log of what the agent sent (none when read from elsewhere)
+    sent: Option<Vec<crate::notify::Sent>>,
 }
 
 fn now() -> f64 {
@@ -155,6 +157,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 board: board::parse_board(&read(board::BOARD_PATH)),
                 inbox: board::parse_inbox(&read(board::INBOX_PATH)),
                 jobs: jobs::local_rows(&dir, 20),
+                sent: Some(crate::notify::read_sent(&dir.join(crate::notify::SENT_LOG))),
             };
             if tx.send(Ok(snap)).is_err() {
                 return;
@@ -547,10 +550,11 @@ fn draw(
         a.jobs,
     );
     // the conversation, newest at the bottom: scroll so the end is in view
-    let mut lines: Vec<Line> = board::conversation(&snap.inbox, &snap.board)
-        .iter()
-        .map(said)
-        .collect();
+    let mut lines: Vec<Line> =
+        board::conversation_with(&snap.inbox, &snap.board, snap.sent.as_deref())
+            .iter()
+            .map(said)
+            .collect();
     lines.extend(pending.iter().map(on_its_way));
     let width = a.talk.width.saturating_sub(2).max(1) as usize;
     let rows: usize = lines.iter().map(|l| l.width().div_ceil(width).max(1)).sum();

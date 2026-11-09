@@ -281,8 +281,14 @@ pub struct Line {
     pub read: bool,
 }
 
-/// The user's messages and the agent's replies, oldest first.
-pub fn conversation(inbox: &Inbox, board: &Board) -> Vec<Line> {
+/// The user's messages and the agent's replies, oldest first. With `sent` (this machine's log of
+/// everything the agent sent: heads-ups, questions, replies) the agent's side comes from it;
+/// without it (read from elsewhere), from the replies on the board.
+pub fn conversation_with(
+    inbox: &Inbox,
+    board: &Board,
+    sent: Option<&[crate::notify::Sent]>,
+) -> Vec<Line> {
     let upto = board
         .inbox_read_upto
         .as_deref()
@@ -297,12 +303,31 @@ pub fn conversation(inbox: &Inbox, board: &Board) -> Vec<Line> {
             text: m.text.clone(),
             read: upto.is_some_and(|u| i <= u),
         })
-        .chain(board.replies.iter().map(|r| Line {
-            at: r.at,
-            who: Who::Agent,
-            text: r.text.clone(),
-            read: true,
-        }))
+        .chain(match sent {
+            Some(sent) => sent
+                .iter()
+                .map(|s| Line {
+                    at: s.at,
+                    who: Who::Agent,
+                    text: if s.urgent {
+                        format!("[urgent] {}: {}", s.title, s.text)
+                    } else {
+                        format!("{}: {}", s.title, s.text)
+                    },
+                    read: true,
+                })
+                .collect::<Vec<_>>(),
+            None => board
+                .replies
+                .iter()
+                .map(|r| Line {
+                    at: r.at,
+                    who: Who::Agent,
+                    text: r.text.clone(),
+                    read: true,
+                })
+                .collect(),
+        })
         .collect();
     lines.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap_or(std::cmp::Ordering::Equal));
     lines
@@ -629,12 +654,47 @@ mod tests {
             }],
             ..Default::default()
         };
-        let c = conversation(&inbox, &board);
+        let c = conversation_with(&inbox, &board, None);
         assert_eq!(
             c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
             ["hi", "here", "still there?"]
         );
         assert_eq!((c[0].read, c[2].read), (true, false));
         assert_eq!(c[1].who, Who::Agent);
+    }
+
+    #[test]
+    fn on_the_machine_the_agent_side_is_everything_it_sent() {
+        let inbox = Inbox {
+            messages: vec![Message {
+                id: "m1".into(),
+                time: 10,
+                text: "ready".into(),
+            }],
+        };
+        let board = Board {
+            replies: vec![Reply {
+                id: "r".into(),
+                text: "only a reply".into(),
+                at: 5.0,
+            }],
+            ..Default::default()
+        };
+        let sent = [crate::notify::Sent {
+            at: 20.0,
+            urgent: true,
+            title: "Test 3".into(),
+            text: "two tones".into(),
+        }];
+        let c = conversation_with(&inbox, &board, Some(&sent));
+        assert_eq!(
+            c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            ["ready", "[urgent] Test 3: two tones"]
+        );
+        assert_eq!(
+            conversation_with(&inbox, &board, None)[0].text,
+            "only a reply",
+            "elsewhere: the board's replies"
+        );
     }
 }
