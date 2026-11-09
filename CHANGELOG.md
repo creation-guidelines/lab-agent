@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.6]
+
+
+### Bug Fixes
+- Keep the rpm assets in their own table - the requires sub-table had split them off ([#22](https://github.com/creation-guidelines/lab-agent/pull/22)) ([4e40ccb])
+
+
+
 ## [0.1.5]
 
 
