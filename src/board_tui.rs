@@ -61,6 +61,34 @@ fn clamp_offset(offset: usize, total: usize, visible: usize) -> usize {
     offset.min(total.saturating_sub(visible))
 }
 
+/// Where a message the user just sent stands, until it shows up filed in the conversation.
+#[derive(Clone, Debug, PartialEq)]
+enum Delivery {
+    Sending,
+    Sent,
+    Failed(String),
+}
+
+#[derive(Clone, Debug)]
+struct Pending {
+    id: u64,
+    text: String,
+    at: f64,
+    state: Delivery,
+}
+
+/// Forgets the pending messages that are now filed in the conversation: same text, filed no
+/// earlier than two minutes before it was sent. A failed one stays, so nothing is lost silently.
+fn settle(pending: &mut Vec<Pending>, inbox: &Inbox) {
+    pending.retain(|p| {
+        p.state != Delivery::Sent
+            || !inbox
+                .messages
+                .iter()
+                .any(|m| m.text.trim() == p.text.trim() && m.time as f64 >= p.at - 120.0)
+    });
+}
+
 #[derive(Default, Clone)]
 struct Snapshot {
     board: Board,
@@ -135,15 +163,11 @@ pub fn run(resolved: &Resolution) -> Result<()> {
         });
     }
 
-    let (status_tx, status_rx) = mpsc::channel::<String>();
+    let (status_tx, status_rx) = mpsc::channel::<(u64, Result<(), String>)>();
+    let (mut pending, mut next_id) = (Vec::<Pending>::new(), 0u64);
     let mut scroll = Scroll::default();
     let mut terminal = ratatui::try_init()?;
-    let (mut snap, mut error, mut input, mut status) = (
-        Snapshot::default(),
-        None::<String>,
-        String::new(),
-        String::new(),
-    );
+    let (mut snap, mut error, mut input) = (Snapshot::default(), None::<String>, String::new());
     let result = (|| -> Result<()> {
         loop {
             while let Ok(got) = rx.try_recv() {
@@ -155,9 +179,15 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     Err(e) => error = Some(e),
                 }
             }
-            while let Ok(s) = status_rx.try_recv() {
-                status = s;
+            while let Ok((id, result)) = status_rx.try_recv() {
+                if let Some(p) = pending.iter_mut().find(|p| p.id == id) {
+                    p.state = match result {
+                        Ok(()) => Delivery::Sent,
+                        Err(e) => Delivery::Failed(e),
+                    };
+                }
             }
+            settle(&mut pending, &snap.inbox);
             terminal.draw(|f| {
                 draw(
                     f,
@@ -165,7 +195,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     error.as_deref(),
                     source,
                     &input,
-                    &status,
+                    &pending,
                     &mut scroll,
                 )
             })?;
@@ -213,25 +243,26 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 }
                 KeyCode::Esc => input.clear(),
                 KeyCode::Enter if !input.trim().is_empty() => {
-                    let text = std::mem::take(&mut input);
-                    let tx = status_tx.clone();
-                    status = "sending...".into();
+                    let text = std::mem::take(&mut input).trim().to_string();
+                    next_id += 1;
+                    pending.push(Pending {
+                        id: next_id,
+                        text: text.clone(),
+                        at: now(),
+                        state: Delivery::Sending,
+                    });
+                    let (tx, id) = (status_tx.clone(), next_id);
                     thread::spawn(move || {
-                        let said = match crate::notify::load() {
+                        let result = match crate::notify::load() {
                             None => {
-                                "sending needs notifications set up here (lab-agent notify-setup)"
-                                    .to_string()
+                                Err("notifications are not set up here (lab-agent notify-setup)"
+                                    .to_string())
                             }
-                            Some(cfg) => match crate::notify::Notifier::new(cfg).send(
-                                crate::notify::Level::Inbox,
-                                "you",
-                                text.trim(),
-                            ) {
-                                Ok(()) => "sent - the agent reads it at its next pause".to_string(),
-                                Err(e) => e.to_string(),
-                            },
+                            Some(cfg) => crate::notify::Notifier::new(cfg)
+                                .send(crate::notify::Level::Inbox, "you", &text)
+                                .map_err(|e| e.to_string()),
                         };
-                        let _ = tx.send(said);
+                        let _ = tx.send((id, result));
                     });
                 }
                 _ => {}
@@ -366,6 +397,38 @@ fn age(task: &board::Task, at: f64) -> String {
     }
 }
 
+/// A message the user sent that is not filed yet: shown at once, with where it stands.
+fn on_its_way(p: &Pending) -> Line<'static> {
+    let (note, style) = match &p.state {
+        Delivery::Sending => (
+            " · sending…".to_string(),
+            Style::default().fg(Color::Yellow),
+        ),
+        Delivery::Sent => (
+            " · sent".to_string(),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+        Delivery::Failed(why) => (
+            format!(" ✗ not sent: {why}"),
+            Style::default().fg(Color::Red),
+        ),
+    };
+    Line::from(vec![
+        Span::styled(
+            format!("{} ", jobs::format_time(p.at)),
+            Style::default().add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            "you: ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(p.text.clone()),
+        Span::styled(note, style),
+    ])
+}
+
 /// A conversation line as shown: time, who, text, and for the user's messages whether it was read.
 fn said(line: &Said) -> Line<'static> {
     let (who, color) = match line.who {
@@ -408,7 +471,7 @@ fn draw(
     error: Option<&str>,
     source: &str,
     input: &str,
-    status: &str,
+    pending: &[Pending],
     scroll: &mut Scroll,
 ) {
     // the box's width does not depend on its height: measure with one row, then grow it
@@ -484,10 +547,11 @@ fn draw(
         a.jobs,
     );
     // the conversation, newest at the bottom: scroll so the end is in view
-    let lines: Vec<Line> = board::conversation(&snap.inbox, &snap.board)
+    let mut lines: Vec<Line> = board::conversation(&snap.inbox, &snap.board)
         .iter()
         .map(said)
         .collect();
+    lines.extend(pending.iter().map(on_its_way));
     let width = a.talk.width.saturating_sub(2).max(1) as usize;
     let rows: usize = lines.iter().map(|l| l.width().div_ceil(width).max(1)).sum();
     let visible = a.talk.height.saturating_sub(2) as usize;
@@ -505,11 +569,7 @@ fn draw(
             )),
         a.talk,
     );
-    let hint = if status.is_empty() {
-        " say something - Enter sends, Esc clears ".to_string()
-    } else {
-        format!(" {status} ")
-    };
+    let hint = " say something - Enter sends, Esc clears ".to_string();
     f.render_widget(
         Paragraph::new(format!("{input}▏"))
             .wrap(Wrap { trim: false })
@@ -601,5 +661,34 @@ mod tests {
             (Pane::Tasks, Pane::Jobs, Pane::Talk)
         );
         assert_eq!(p.prev(), Pane::Jobs);
+    }
+
+    #[test]
+    fn a_sent_message_stays_until_it_is_filed_and_a_failed_one_stays() {
+        let p = |id, text: &str, state| Pending {
+            id,
+            text: text.into(),
+            at: 1000.0,
+            state,
+        };
+        let mut pending = vec![
+            p(1, "ready", Delivery::Sent),
+            p(2, "hello", Delivery::Failed("offline".into())),
+            p(3, "later", Delivery::Sent),
+        ];
+        let inbox = Inbox {
+            messages: vec![board::Message {
+                id: "m".into(),
+                time: 1001,
+                text: "ready ".into(),
+            }],
+        };
+        settle(&mut pending, &inbox);
+        let left: Vec<u64> = pending.iter().map(|p| p.id).collect();
+        assert_eq!(
+            left,
+            [2, 3],
+            "filed 'ready' goes; the failed one and the unfiled one stay"
+        );
     }
 }

@@ -179,6 +179,13 @@ So the user can follow a long session, and speak into it, without interrupting i
   by state, the jobs, the conversation (the user's messages, read ticks, the agent's replies) and a
   reply box (Enter sends to the inbox). Its layout follows the window: side by side when wide,
   a 2x2 grid when square (tiling), stacked when tall (a phone).
+- **Desktop popups**: every notification also pops up on the machine's desktop (notify-send: KDE,
+  GNOME, XFCE, mako, dunst; without a notification service a zenity/kdialog window), info as
+  normal, urgent as critical (stays until dismissed). Read receipts do not pop up. `desktop = false`
+  in notify.toml turns it off. Send the heads-up (what to expect, what to check) *before* the
+  thing happens: the popup is instant even when the phone's ntfy app is late.
+- **Sent messages show at once** on the board: sending..., sent, then the filed line; a failed one
+  stays in red with the reason.
 - **Delivery delays are the phone's**, not the sender's: Android holds ntfy messages back unless each
   subscription has Instant delivery on and ntfy is Unrestricted in battery settings.
   The machine running the agent sends the open tasks to the user's info channel every 5 minutes
