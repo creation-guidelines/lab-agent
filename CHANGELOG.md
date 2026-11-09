@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.16]
+
+
+### Features
+- The control board - tasks, jobs and the conversation in one live view, with a reply box ([#44](https://github.com/creation-guidelines/lab-agent/pull/44)) ([15c82c6])
+
+
+
 ## [0.1.15]
 
 
