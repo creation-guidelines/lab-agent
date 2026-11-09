@@ -175,6 +175,9 @@ So the user can follow a long session, and speak into it, without interrupting i
   `resume ID`, `done ID`. `lab-agent board` alone, in a terminal, is a live view with a color per state
   (on the agent's machine it reads a local copy: no network); `board show` prints it once. Done
   tasks stay a day.
+- **Planned and projects**: `board plan ID "text" --project NAME` adds a task not started yet (after
+  the active work, not in digests; `resume` starts it); `--project` on set or plan files a task under a
+  project. The board's task pane shows tabs, all first, switched with the left and right arrows.
 - **The control board** (`lab-agent board` in a terminal) is one live view of the whole system: tasks
   by state, the jobs, the conversation (the user's messages, read ticks, the agent's replies) and a
   reply box (Enter sends to the inbox). Its layout follows the window: side by side when wide,

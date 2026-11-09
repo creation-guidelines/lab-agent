@@ -58,6 +58,8 @@ pub enum State {
     /// Waiting for the user.
     Waiting,
     Paused,
+    /// Not started yet: shown after the active work, not in digests.
+    Planned,
     Done,
 }
 
@@ -67,12 +69,13 @@ impl State {
             State::Ongoing => "ongoing",
             State::Waiting => "waiting for you",
             State::Paused => "paused",
+            State::Planned => "planned",
             State::Done => "done",
         }
     }
-    /// Live tasks are reported; done ones are not.
+    /// Live tasks are the active ones, reported in digests; planned and done ones are not.
     pub fn is_live(self) -> bool {
-        self != State::Done
+        matches!(self, State::Ongoing | State::Waiting | State::Paused)
     }
     /// Display order: what needs the user first, finished last.
     fn rank(self) -> u8 {
@@ -80,7 +83,8 @@ impl State {
             State::Waiting => 0,
             State::Ongoing => 1,
             State::Paused => 2,
-            State::Done => 3,
+            State::Planned => 3,
+            State::Done => 4,
         }
     }
 }
@@ -94,6 +98,9 @@ pub struct Task {
     pub state: State,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub done_at: Option<f64>,
+    /// Which project the task belongs to (none: shown under "all" only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
 }
 
 /// How long a finished task stays on the board, and how many finished tasks at most.
@@ -103,6 +110,18 @@ const KEEP_DONE: usize = 15;
 impl Board {
     pub fn live(&self) -> usize {
         self.tasks.iter().filter(|t| t.state.is_live()).count()
+    }
+
+    /// The projects tasks belong to, sorted.
+    pub fn projects(&self) -> Vec<String> {
+        let mut p: Vec<String> = self
+            .tasks
+            .iter()
+            .filter_map(|t| t.project.clone())
+            .collect();
+        p.sort();
+        p.dedup();
+        p
     }
 
     /// The tasks in display order: waiting for the user, ongoing, paused, then the latest done.
@@ -120,7 +139,8 @@ impl Board {
     }
 }
 
-/// One change to the board, applied the same way by the CLI and in tests.
+/// One change to the board without a project (the tests' shorthand for [`apply_in`]).
+#[cfg(test)]
 pub fn apply(
     board: &mut Board,
     action: &str,
@@ -128,30 +148,54 @@ pub fn apply(
     text: Option<&str>,
     at: f64,
 ) -> Result<()> {
+    apply_in(board, action, id, text, None, at)
+}
+
+/// One change to the board, applied the same way by the CLI and in tests; `project` is the one a new
+/// or updated task belongs to.
+pub fn apply_in(
+    board: &mut Board,
+    action: &str,
+    id: Option<&str>,
+    text: Option<&str>,
+    project: Option<&str>,
+    at: f64,
+) -> Result<()> {
     let need_id = || id.ok_or_else(|| anyhow::anyhow!("usage: lab-agent board {action} ID"));
     match action {
-        "set" => {
+        "set" | "plan" => {
+            let state = if action == "plan" {
+                State::Planned
+            } else {
+                State::Ongoing
+            };
             let (id, text) = (
                 need_id()?,
                 text.ok_or_else(|| {
-                    anyhow::anyhow!("usage: lab-agent board set ID \"what is being done\"")
+                    anyhow::anyhow!("usage: lab-agent board {action} ID \"what is to be done\"")
                 })?,
             );
             match board.tasks.iter_mut().find(|t| t.id == id) {
                 Some(t) => {
                     t.text = text.to_string();
-                    if t.state == State::Done {
+                    if t.state == State::Done
+                        || (t.state == State::Planned && state == State::Ongoing)
+                    {
                         t.since = at;
                     }
-                    t.state = State::Ongoing;
+                    t.state = state;
                     t.done_at = None;
+                    if let Some(p) = project {
+                        t.project = Some(p.to_string());
+                    }
                 }
                 None => board.tasks.push(Task {
                     id: id.into(),
                     text: text.into(),
                     since: at,
-                    state: State::Ongoing,
+                    state,
                     done_at: None,
+                    project: project.map(String::from),
                 }),
             }
         }
@@ -162,6 +206,9 @@ pub fn apply(
                 .iter_mut()
                 .find(|t| t.id == id)
                 .ok_or_else(|| anyhow::anyhow!("no task {id} on the board"))?;
+            if action == "resume" && t.state == State::Planned {
+                t.since = at;
+            }
             t.state = match action {
                 "wait" => State::Waiting,
                 "pause" => State::Paused,
@@ -264,6 +311,9 @@ pub fn parse_board(bytes: &[u8]) -> Board {
     serde_json::from_slice(bytes).unwrap_or_default()
 }
 
+/// The title the agent's replies are sent with.
+pub const REPLY_TITLE: &str = "Claude";
+
 /// Who said a line of the conversation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Who {
@@ -303,9 +353,18 @@ pub fn conversation_with(
             text: m.text.clone(),
             read: upto.is_some_and(|u| i <= u),
         })
-        .chain(match sent {
-            Some(sent) => sent
+        .chain(board.replies.iter().map(|r| Line {
+            at: r.at,
+            who: Who::Agent,
+            text: r.text.clone(),
+            read: true,
+        }))
+        // this machine's log adds what is not a reply (heads-ups, questions); replies come from
+        // the board, which has them all, also from before the log existed
+        .chain(
+            sent.unwrap_or_default()
                 .iter()
+                .filter(|s| s.title != REPLY_TITLE)
                 .map(|s| Line {
                     at: s.at,
                     who: Who::Agent,
@@ -315,19 +374,8 @@ pub fn conversation_with(
                         format!("{}: {}", s.title, s.text)
                     },
                     read: true,
-                })
-                .collect::<Vec<_>>(),
-            None => board
-                .replies
-                .iter()
-                .map(|r| Line {
-                    at: r.at,
-                    who: Who::Agent,
-                    text: r.text.clone(),
-                    read: true,
-                })
-                .collect(),
-        })
+                }),
+        )
         .collect();
     lines.sort_by(|a, b| a.at.partial_cmp(&b.at).unwrap_or(std::cmp::Ordering::Equal));
     lines
@@ -390,8 +438,16 @@ pub fn board_cli(resolved: &Resolution) -> Result<()> {
         let (cfg, client) = client()?;
         let id = Contract::BOARD_ID.get_from_or_default(resolved);
         let text = Contract::BOARD_TEXT.get_from_or_default(resolved);
+        let project = Contract::BOARD_PROJECT.get_from_or_default(resolved);
         update_board(&client, &cfg, |b| {
-            apply(b, &action, id.as_deref(), text.as_deref(), now())
+            apply_in(
+                b,
+                &action,
+                id.as_deref(),
+                text.as_deref(),
+                project.as_deref(),
+                now(),
+            )
         })?
     };
     if json {
@@ -402,7 +458,12 @@ pub fn board_cli(resolved: &Resolution) -> Result<()> {
             board.every_minutes
         );
         for t in board.ordered() {
-            println!("  {:<16} {:<10} {}", t.state.word(), t.id, t.text);
+            let project = t
+                .project
+                .as_deref()
+                .map(|p| format!("[{p}] "))
+                .unwrap_or_default();
+            println!("  {:<16} {:<10} {project}{}", t.state.word(), t.id, t.text);
         }
         if board.tasks.is_empty() {
             println!("  (empty)");
@@ -532,6 +593,7 @@ mod tests {
             since: 0.0,
             state: State::Ongoing,
             done_at: None,
+            project: None,
         });
         b.tasks.push(Task {
             id: "b".into(),
@@ -539,6 +601,7 @@ mod tests {
             since: 540.0,
             state: State::Ongoing,
             done_at: None,
+            project: None,
         });
         assert_eq!(
             digest(&b, 600.0).unwrap(),
@@ -664,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn on_the_machine_the_agent_side_is_everything_it_sent() {
+    fn on_the_machine_the_chat_adds_the_log_to_the_replies() {
         let inbox = Inbox {
             messages: vec![Message {
                 id: "m1".into(),
@@ -689,12 +752,76 @@ mod tests {
         let c = conversation_with(&inbox, &board, Some(&sent));
         assert_eq!(
             c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
-            ["ready", "[urgent] Test 3: two tones"]
+            ["only a reply", "ready", "[urgent] Test 3: two tones"]
         );
         assert_eq!(
             conversation_with(&inbox, &board, None)[0].text,
             "only a reply",
-            "elsewhere: the board's replies"
+            "elsewhere: the replies"
+        );
+    }
+
+    #[test]
+    fn planned_tasks_wait_quietly_and_start_their_clock_when_resumed() {
+        let mut b = Board::default();
+        apply_in(
+            &mut b,
+            "plan",
+            Some("mic"),
+            Some("test the microphone"),
+            Some("surya-audio"),
+            0.0,
+        )
+        .unwrap();
+        apply_in(
+            &mut b,
+            "set",
+            Some("tui"),
+            Some("projects on the board"),
+            Some("lab-agent"),
+            0.0,
+        )
+        .unwrap();
+        assert_eq!(b.live(), 1, "planned is not live");
+        assert_eq!(digest(&b, 60.0).unwrap(), "- projects on the board (1 min)");
+        assert_eq!(b.projects(), ["lab-agent", "surya-audio"]);
+        assert_eq!(b.ordered().last().unwrap().state, State::Planned);
+        apply(&mut b, "resume", Some("mic"), None, 600.0).unwrap();
+        let mic = b.tasks.iter().find(|t| t.id == "mic").unwrap();
+        assert_eq!(
+            (mic.state, mic.since, mic.project.as_deref()),
+            (State::Ongoing, 600.0, Some("surya-audio"))
+        );
+    }
+
+    #[test]
+    fn the_chat_has_every_reply_and_the_other_messages_once() {
+        let board = Board {
+            replies: vec![Reply {
+                id: "r".into(),
+                text: "got it".into(),
+                at: 5.0,
+            }],
+            ..Default::default()
+        };
+        let sent = [
+            crate::notify::Sent {
+                at: 5.0,
+                urgent: false,
+                title: REPLY_TITLE.into(),
+                text: "got it".into(),
+            },
+            crate::notify::Sent {
+                at: 9.0,
+                urgent: true,
+                title: "Test".into(),
+                text: "listen".into(),
+            },
+        ];
+        let c = conversation_with(&Inbox::default(), &board, Some(&sent));
+        assert_eq!(
+            c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
+            ["got it", "[urgent] Test: listen"]
         );
     }
 }
