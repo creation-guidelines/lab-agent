@@ -371,9 +371,16 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { return };
-                let mut buf = [0u8; 8192];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                // Read to the end of the headers: one read() is not one request.
+                let (mut got, mut buf) = (Vec::new(), [0u8; 8192]);
+                while !String::from_utf8_lossy(&got).contains("\r\n\r\n") {
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&buf[..n]);
+                }
+                let head = String::from_utf8_lossy(&got).to_string();
                 let path = head
                     .lines()
                     .next()

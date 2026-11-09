@@ -102,6 +102,13 @@ On the machine that runs the agent they read its own records (instant, no networ
 GitHub is unreachable); anywhere else they read the results repo on GitHub, and `--remote` forces
 that on the machine too. A `running` job that has outlived its limit is shown as `stale`.
 
+## Notifications on your phone
+
+`lab-agent notify-setup` makes your own two private ntfy channels (info and urgent), sends a test
+to each and tells you what to subscribe to in the ntfy app. Then `lab-agent notify "text"`,
+`lab-agent notify --urgent "text"`, or `lab-agent submit --notify job.sh` to hear how a job ended.
+Details in [AGENTS.md](AGENTS.md#notifications-ntfy).
+
 ## Running things as root
 
 Job scripts that need root don't get a sudoers line per command. `connect` grants exactly one,

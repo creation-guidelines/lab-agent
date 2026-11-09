@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::io::{self, Write};
 use std::process::Command;
 
-fn ask(prompt: &str, default: &str) -> Result<String> {
+pub(crate) fn ask(prompt: &str, default: &str) -> Result<String> {
     print!("{prompt} [{default}]: ");
     io::stdout().flush()?;
     let mut line = String::new();
@@ -101,6 +101,15 @@ pub fn run() -> Result<()> {
 
     setup_sudo()?;
     setup_systemd()?;
+
+    if ask("set up notifications on your phone (ntfy)? (y/n)", "n")?
+        .to_lowercase()
+        .starts_with('y')
+    {
+        crate::notify::setup()?;
+    } else {
+        println!("(later: lab-agent notify-setup)");
+    }
 
     println!(
         "\nready. Push a job to {owner}/{jobs_repo}'s jobs/ directory on {}.",

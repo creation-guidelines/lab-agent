@@ -8,6 +8,7 @@ mod github;
 mod job;
 mod jobs;
 mod monitor;
+mod notify;
 mod self_update;
 
 use anyhow::{bail, Result};
@@ -77,6 +78,8 @@ fn run() -> Result<()> {
         Command::Submit => std::process::exit(agent::submit(&resolved)?),
         Command::Wait => std::process::exit(agent::wait(&resolved)?),
         Command::Logs => std::process::exit(agent::logs(&resolved)?),
+        Command::Notify => notify::send_cli(&resolved),
+        Command::NotifySetup => notify::setup(),
         Command::SelfUpdate => self_update::run(),
         Command::Completions => completions::completions(&resolved),
         Command::Man => completions::man(),

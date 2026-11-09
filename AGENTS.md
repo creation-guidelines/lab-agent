@@ -144,6 +144,24 @@ push). Treat it as unknown, never as running; `lab-agent jobs` and `monitor` sho
 - Heavy work (builds, anything that wants the machine's cores, anything that touches hardware)
   belongs on the lab machine, not in your own sandbox.
 
+## Notifications (ntfy)
+
+`lab-agent notify-setup` (also offered at the end of `connect`) gives each user **their own two
+channels** on [ntfy](https://ntfy.sh): `info` for progress, `urgent` for "you are needed". Their
+names are 120-bit random strings made on that user's machine and kept only in `notify.toml`
+(mode 0600) beside the config - they are the secret, so never put one in a flag, a log, a script
+or a repo. Nobody shares a channel: two users of lab-agent never see each other's messages.
+
+- `lab-agent notify "text"` / `lab-agent notify --urgent "text"` sends from the machine it runs on.
+- `lab-agent submit --notify job.sh` (or `notify=yes` in the `# lab:` header) makes the agent tell
+  the phone how the job ended: info if it succeeded, urgent if not, with its last lines.
+- **An agent working remotely does not need the secret**: it submits a job that runs
+  `lab-agent notify ...`, or submits with `--notify`; the lab machine sends.
+- A sender with no `notify.toml` (CI, a sandbox) can use `LAB_AGENT_NTFY_INFO_TOPIC`,
+  `LAB_AGENT_NTFY_URGENT_TOPIC`, `LAB_AGENT_NTFY_SERVER`, `LAB_AGENT_NTFY_TOKEN`.
+- On the public ntfy.sh server, "private" means unguessable, not encrypted. For encryption or
+  access control, use your own ntfy server or one with access tokens; setup asks for both.
+
 ## Conventions this repo follows
 
 Part of the `creation-guidelines` org; follows
