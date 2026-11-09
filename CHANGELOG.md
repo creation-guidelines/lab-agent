@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.14]
+
+
+### Features
+- The board as a live TUI, with task states ([#40](https://github.com/creation-guidelines/lab-agent/pull/40)) ([3bd4366])
+
+
+
 ## [0.1.13]
 
 
