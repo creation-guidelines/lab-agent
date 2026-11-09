@@ -82,6 +82,7 @@ fn run() -> Result<()> {
         Command::Wait => std::process::exit(agent::wait(&resolved)?),
         Command::Logs => std::process::exit(agent::logs(&resolved)?),
         Command::Notify => notify::send_cli(&resolved),
+        Command::Ask => std::process::exit(desktop::ask_cli(&resolved)?),
         Command::NotifySetup => notify::setup(),
         Command::Board => board::board_cli(&resolved),
         Command::Inbox => board::inbox_cli(&resolved),

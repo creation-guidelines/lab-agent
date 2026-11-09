@@ -179,9 +179,15 @@ So the user can follow a long session, and speak into it, without interrupting i
   by state, the jobs, the conversation (the user's messages, read ticks, the agent's replies) and a
   reply box (Enter sends to the inbox). Its layout follows the window: side by side when wide,
   a 2x2 grid when square (tiling), stacked when tall (a phone).
-- **Desktop popups**: every notification also pops up on the machine's desktop (notify-send: KDE,
-  GNOME, XFCE, mako, dunst; without a notification service a zenity/kdialog window), info as
-  normal, urgent as critical (stays until dismissed). Read receipts do not pop up. `desktop = false`
+- **Desktop popups** only for urgent messages (they need the user): notify-send (KDE, GNOME, XFCE,
+  mako, dunst) as critical, a zenity/kdialog window only where no notification service runs (the
+  reason is logged). Info, digests and receipts never pop up.
+- **Ask with buttons, then wait**: `lab-agent ask "what will happen, what to check" --choices
+  "Go,Not yet" --within 300` shows a popup with buttons, blocks until clicked and prints the button
+  (exit 2: no answer). Use it before anything the user must witness: run it as a job and act on
+  its output. The question is in the board's chat and the click lands in the inbox.
+- **The board's chat shows everything the agent sent** from the machine (sent.jsonl in the state
+  directory; not digests or receipts). `desktop = false`
   in notify.toml turns it off. Send the heads-up (what to expect, what to check) *before* the
   thing happens: the popup is instant even when the phone's ntfy app is late.
 - **Sent messages show at once** on the board: sending..., sent, then the filed line; a failed one

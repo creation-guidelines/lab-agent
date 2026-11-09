@@ -34,6 +34,7 @@ pub enum Command {
     NotifySetup,
     Board,
     Inbox,
+    Ask,
     SelfUpdate,
     RootExec,
     Completions,
@@ -53,6 +54,7 @@ impl Command {
         Command::NotifySetup,
         Command::Board,
         Command::Inbox,
+        Command::Ask,
         Command::SelfUpdate,
         Command::RootExec,
         Command::Completions,
@@ -73,6 +75,7 @@ impl Command {
             Command::NotifySetup => "notify-setup",
             Command::Board => "board",
             Command::Inbox => "inbox",
+            Command::Ask => "ask",
             Command::SelfUpdate => "self-update",
             Command::RootExec => "root-exec",
             Command::Completions => "completions",
@@ -102,6 +105,7 @@ impl Command {
             Command::Inbox => {
                 "Your messages from the ntfy inbox channel: inbox [--ack] [--reply TEXT]"
             }
+            Command::Ask => "Ask the user with buttons on the desktop; prints the button pressed",
             Command::SelfUpdate => "Update lab-agent through pacman and restart the service",
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
@@ -235,7 +239,7 @@ contract! {
     WITHIN: u64, Command = Input {
         key:         "within",
         ty:          Type::Uint,
-        subcommands: &[Command::Submit, Command::Wait],
+        subcommands: &[Command::Submit, Command::Wait, Command::Ask],
         arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("within") }),
         summary:     "Stop waiting after this many seconds; the job keeps running",
         ..Input::EMPTY
@@ -370,6 +374,27 @@ contract! {
         summary:     "Mark them read; the user gets a receipt",
         ..Input::EMPTY
     };
+
+    /// The question to ask on the desktop.
+    ASK_QUESTION: String, Command = Input {
+        key:         "question",
+        ty:          Type::String,
+        subcommands: &[Command::Ask],
+        arg:         Some(Arg { value_name: "QUESTION", ..Arg::positional(0) }),
+        summary:     "What to ask (say what will happen and what to check)",
+        ..Input::EMPTY
+    };
+
+    /// The buttons, comma separated.
+    ASK_CHOICES: String, Command = Input {
+        key:         "choices",
+        ty:          Type::String,
+        subcommands: &[Command::Ask],
+        arg:         Some(Arg { value_name: "A,B", ..Arg::long("choices") }),
+        summary:     "The buttons, comma separated (default: OK)",
+        ..Input::EMPTY
+    };
+
 
     /// A message to send to the agent (none: show unread messages).
     INBOX_TEXT: String, Command = Input {
@@ -618,5 +643,23 @@ mod tests {
             Contract::INBOX_TEXT.get_from_or_default(&r),
             Some("please pause the flashing".into())
         );
+    }
+
+    #[test]
+    fn ask_takes_a_question_buttons_and_a_limit() {
+        let r = resolve(&[
+            "ask",
+            "Ready for the tones?",
+            "--choices",
+            "Go,Not yet",
+            "--within",
+            "120",
+        ]);
+        assert!(lint(&Contract::records(), &r).is_empty());
+        assert_eq!(
+            Contract::ASK_CHOICES.get_from_or_default(&r),
+            Some("Go,Not yet".into())
+        );
+        assert_eq!(Contract::WITHIN.get_from_or_default(&r), Some(120));
     }
 }

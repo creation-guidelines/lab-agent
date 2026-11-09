@@ -54,6 +54,55 @@ fn yes() -> bool {
 
 pub const DEFAULT_SERVER: &str = "https://ntfy.sh";
 
+/// The title of the board's periodic digest: it pops up, but stays out of the conversation.
+pub const DIGEST_TITLE: &str = "lab-agent: what I'm doing";
+
+/// What the agent sent the user from this machine, newest last: the board's conversation reads it.
+pub const SENT_LOG: &str = "sent.jsonl";
+const SENT_KEEP: usize = 300;
+
+/// One message the agent sent.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Sent {
+    pub at: f64,
+    pub urgent: bool,
+    pub title: String,
+    pub text: String,
+}
+
+pub fn record_sent(level: Level, title: &str, message: &str) {
+    let path = crate::daemon::state_dir().join(SENT_LOG);
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+    let line = Sent {
+        at,
+        urgent: level == Level::Urgent,
+        title: title.into(),
+        text: message.into(),
+    };
+    let mut all = read_sent(&path);
+    all.push(line);
+    let keep = all.len().saturating_sub(SENT_KEEP);
+    let body: String = all[keep..]
+        .iter()
+        .filter_map(|s| serde_json::to_string(s).ok())
+        .map(|l| l + "\n")
+        .collect();
+    let tmp = path.with_extension("jsonl.tmp");
+    let _ = std::fs::write(&tmp, body).and_then(|()| std::fs::rename(&tmp, &path));
+}
+
+/// The sent log; lines that do not parse are skipped.
+pub fn read_sent(path: &std::path::Path) -> Vec<Sent> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
 pub fn notify_path() -> PathBuf {
     crate::config::config_path().with_file_name("notify.toml")
 }
@@ -139,6 +188,9 @@ impl Notifier {
         };
         if self.cfg.desktop && popup {
             crate::desktop::popup(level, title, message);
+        }
+        if popup && level != Level::Inbox && title != DIGEST_TITLE {
+            record_sent(level, title, message);
         }
         let url = format!("{}/{topic}", self.cfg.server.trim_end_matches('/'));
         let mut request = self

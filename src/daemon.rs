@@ -744,7 +744,7 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         if last_digest.elapsed() >= every {
             if let Some(text) = board::digest(&board, now_unix()) {
                 if notifier
-                    .send(Level::Info, "lab-agent: what I'm doing", &text)
+                    .send(Level::Info, crate::notify::DIGEST_TITLE, &text)
                     .is_ok()
                 {
                     last_digest = std::time::Instant::now();
