@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.19]
+
+
+### Features
+- Ask with buttons; popups only for what needs the user; the agent's messages in the board chat ([#51](https://github.com/creation-guidelines/lab-agent/pull/51)) ([809f155])
+
+
+
 ## [0.1.18]
 
 
