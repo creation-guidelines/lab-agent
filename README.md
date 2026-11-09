@@ -113,7 +113,7 @@ Details in [AGENTS.md](AGENTS.md#notifications-ntfy).
 
 `lab-agent board` holds what the agent is doing; your machine sends it to your info channel every 5
 minutes while anything is open. Write to the agent in the **inbox** channel from the ntfy app, or
-`lab-agent inbox "text"` on the machine: it
+`lab-agent inbox "text"` on the machine (that one goes straight to GitHub, no ntfy): it
 reads new messages at natural pauses, and you get a receipt. (Run `lab-agent notify-setup` again to
 add the inbox to an existing setup; your other channels are kept.) Every notification also pops up on the
 desktop (KDE, GNOME and anything speaking the freedesktop spec; a small window otherwise).

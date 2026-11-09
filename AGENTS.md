@@ -195,6 +195,11 @@ So the user can follow a long session, and speak into it, without interrupting i
   thing happens: the popup is instant even when the phone's ntfy app is late.
 - **Sent messages show at once** on the board: sending..., sent, then the filed line; a failed one
   stays in red with the reason.
+- **The conversation does not depend on ntfy.** Messages from the machine (the board's reply box,
+  `lab-agent inbox "text"`) go straight into `inbox.json` on GitHub, like jobs and results, and
+  into the local copy. My replies live on the board (GitHub), heads-ups in the local sent log. ntfy
+  only carries messages *from the phone* (the daemon files them into the same inbox) and copies
+  messages *to the phone*.
 - **Delivery delays are the phone's**, not the sender's: Android holds ntfy messages back unless each
   subscription has Instant delivery on and ntfy is Unrestricted in battery settings.
   The machine running the agent sends the open tasks to the user's info channel every 5 minutes
