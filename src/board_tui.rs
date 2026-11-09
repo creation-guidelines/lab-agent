@@ -261,15 +261,8 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     });
                     let (tx, id) = (status_tx.clone(), next_id);
                     thread::spawn(move || {
-                        let result = match crate::notify::load() {
-                            None => {
-                                Err("notifications are not set up here (lab-agent notify-setup)"
-                                    .to_string())
-                            }
-                            Some(cfg) => crate::notify::Notifier::new(cfg)
-                                .send(crate::notify::Level::Inbox, "you", &text)
-                                .map_err(|e| e.to_string()),
-                        };
+                        // straight into the inbox on GitHub (and the local copy): no ntfy
+                        let result = board::file_from_here(&text).map_err(|e| e.to_string());
                         let _ = tx.send((id, result));
                     });
                 }

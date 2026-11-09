@@ -501,12 +501,72 @@ pub fn inbox_cli(resolved: &Resolution) -> Result<()> {
 
 /// Sends a message to the agent through the inbox channel, from this machine.
 pub fn send_to_agent(text: &str) -> Result<()> {
-    let cfg = crate::notify::load().ok_or_else(|| {
-        anyhow::anyhow!("notifications are not set up here: run `lab-agent notify-setup`")
-    })?;
-    crate::notify::Notifier::new(cfg).send(crate::notify::Level::Inbox, "you", text.trim())?;
-    println!("sent; the agent reads it at its next pause");
+    file_from_here(text)?;
+    println!("filed; the agent reads it at its next pause");
     Ok(())
+}
+
+/// Files a message from this machine straight into the inbox on GitHub - the one queue the agent
+/// reads, the same way jobs and results travel - and into the local copy the board reads, so it
+/// shows at once. ntfy is not involved: it only carries messages from the phone.
+pub fn file_from_here(text: &str) -> Result<()> {
+    let (cfg, client) = client()?;
+    let at = now();
+    let message = Message {
+        id: format!("pc-{}", (at * 1000.0) as u64),
+        time: at as i64,
+        text: text.trim().to_string(),
+    };
+    let inbox = file_in_inbox(&client, &cfg, std::slice::from_ref(&message))?;
+    let dir = crate::daemon::state_dir();
+    if dir.is_dir() {
+        let _ = std::fs::write(dir.join(INBOX_PATH), serde_json::to_vec_pretty(&inbox)?);
+    }
+    Ok(())
+}
+
+/// Adds `new` to `inbox`: each message once (by id), the newest hundred kept.
+pub fn merge_messages(inbox: &mut Inbox, new: &[Message]) {
+    for m in new {
+        if !inbox.messages.iter().any(|x| x.id == m.id) {
+            inbox.messages.push(m.clone());
+        }
+    }
+    let keep = inbox.messages.len().saturating_sub(100);
+    inbox.messages.drain(..keep);
+}
+
+/// Files messages in the inbox on GitHub, retrying when someone else wrote it meanwhile (the
+/// daemon filing a phone message, say); returns the inbox as written.
+pub fn file_in_inbox(client: &Client, cfg: &Config, new: &[Message]) -> Result<Inbox> {
+    for _ in 0..3 {
+        let current = client.get_file(
+            &cfg.owner,
+            &cfg.results_repo,
+            INBOX_PATH,
+            &cfg.results_branch,
+        )?;
+        let (mut inbox, sha) = match current {
+            Some(f) => (parse_inbox(&f.content), Some(f.sha)),
+            None => (Inbox::default(), None),
+        };
+        merge_messages(&mut inbox, new);
+        let body = serde_json::to_vec_pretty(&inbox)?;
+        match client.put_file(
+            &cfg.owner,
+            &cfg.results_repo,
+            INBOX_PATH,
+            &cfg.results_branch,
+            &body,
+            "inbox: new message",
+            sha.as_deref(),
+        ) {
+            Ok(_) => return Ok(inbox),
+            Err(e) if e.to_string().contains("409") => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    bail!("the inbox kept changing under us; try again")
 }
 
 fn inbox_read(resolved: &Resolution) -> Result<()> {
@@ -822,6 +882,31 @@ mod tests {
         assert_eq!(
             c.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(),
             ["got it", "[urgent] Test: listen"]
+        );
+    }
+
+    #[test]
+    fn filing_keeps_each_message_once_and_the_newest_hundred() {
+        let m = |i: i64| Message {
+            id: format!("pc-{i}"),
+            time: i,
+            text: format!("m{i}"),
+        };
+        let mut inbox = Inbox {
+            messages: (0..99).map(m).collect(),
+        };
+        merge_messages(&mut inbox, &[m(98), m(99), m(100)]);
+        assert_eq!(
+            inbox.messages.len(),
+            100,
+            "98 was there already; 99 and 100 push out the oldest"
+        );
+        assert_eq!(
+            (
+                inbox.messages[0].id.as_str(),
+                inbox.messages[99].id.as_str()
+            ),
+            ("pc-1", "pc-100")
         );
     }
 }

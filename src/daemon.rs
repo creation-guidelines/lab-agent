@@ -652,7 +652,7 @@ const BOARD_EVERY: Duration = Duration::from_secs(30);
 /// the open tasks every `every_minutes`, a note when they are all done, a receipt when inbox
 /// messages are read, each new reply; and the user's new inbox messages filed for the agent.
 fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
-    use crate::board::{self, Board, Inbox};
+    use crate::board::{self, Board};
     use crate::notify::{Level, Notifier};
     let cfg = &shared.cfg;
     let cursor_path = state_dir.join("inbox.cursor");
@@ -754,37 +754,16 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         // 3. the user's new inbox messages, filed in the results repo for the agent
         match crate::notify::poll_inbox(&ncfg, cursor.as_deref()) {
             Ok(new) if !new.is_empty() => {
+                let msgs: Vec<board::Message> = new
+                    .iter()
+                    .map(|m| board::Message {
+                        id: m.id.clone(),
+                        time: m.time,
+                        text: m.text.clone(),
+                    })
+                    .collect();
                 let filed = with_retry(shared, "inbox", || {
-                    let current = shared.client.get_file(
-                        &cfg.owner,
-                        &cfg.results_repo,
-                        board::INBOX_PATH,
-                        &cfg.results_branch,
-                    )?;
-                    let (mut inbox, sha) = match current {
-                        Some(f) => (board::parse_inbox(&f.content), Some(f.sha)),
-                        None => (Inbox::default(), None),
-                    };
-                    for m in &new {
-                        if !inbox.messages.iter().any(|x| x.id == m.id) {
-                            inbox.messages.push(board::Message {
-                                id: m.id.clone(),
-                                time: m.time,
-                                text: m.text.clone(),
-                            });
-                        }
-                    }
-                    let keep = inbox.messages.len().saturating_sub(100);
-                    inbox.messages.drain(..keep);
-                    shared.client.put_file(
-                        &cfg.owner,
-                        &cfg.results_repo,
-                        board::INBOX_PATH,
-                        &cfg.results_branch,
-                        &serde_json::to_vec_pretty(&inbox)?,
-                        "inbox: new message",
-                        sha.as_deref(),
-                    )?;
+                    let inbox = board::file_in_inbox(&shared.client, cfg, &msgs)?;
                     let _ = std::fs::write(&inbox_local, serde_json::to_vec_pretty(&inbox)?);
                     Ok(())
                 });
