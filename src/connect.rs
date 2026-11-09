@@ -168,9 +168,16 @@ fn setup_systemd() -> Result<()> {
         .status()?;
     anyhow::ensure!(reload.success(), "systemctl --user daemon-reload failed - is a user session/D-Bus bus available? (this needs to run as a logged-in user, not over a bare SSH session with no session bus, and never under sudo)");
     let enable = Command::new("systemctl")
-        .args(["--user", "enable", "--now", "lab-agent"])
+        .args(["--user", "enable", "lab-agent"])
         .status()?;
-    anyhow::ensure!(enable.success(), "systemctl --user enable --now lab-agent failed - the unit is written to {}, but did not start; check `systemctl --user status lab-agent`", unit_dir.join("lab-agent.service").display());
+    anyhow::ensure!(enable.success(), "systemctl --user enable lab-agent failed");
+    // `--now` only starts a service that is not already active - it does nothing if an older
+    // invocation (a previous install's process) is still running under the same unit name,
+    // silently leaving that stale process in place. `restart` always picks up the new ExecStart.
+    let restart = Command::new("systemctl")
+        .args(["--user", "restart", "lab-agent"])
+        .status()?;
+    anyhow::ensure!(restart.success(), "systemctl --user restart lab-agent failed - the unit is written to {}, but did not (re)start; check `systemctl --user status lab-agent`", unit_dir.join("lab-agent.service").display());
     let linger = Command::new("loginctl")
         .args(["enable-linger", &std::env::var("USER").unwrap_or_default()])
         .status();

@@ -1,93 +1,77 @@
+mod completions;
 mod config;
 mod connect;
+mod contract;
 mod daemon;
 mod github;
 mod job;
+mod jobs;
 mod monitor;
+mod self_update;
 
 use anyhow::{bail, Result};
 use argenv_resolve::*;
-
-// lab-agent's invocation surface, declared once: one source for the parser, the generated
-// --help, and (via `Contract::records()`) the published contract. Subcommand *selection*
-// (connect/run/monitor/root-exec) is plain argv[1] dispatch - argenv models one flat
-// invocation's flags, not a subcommand tree, so each subcommand would declare its own
-// contract if it ever needs flags beyond this shared one.
-contract! {
-    /// Print extra diagnostic output.
-    VERBOSE: bool = Input {
-        key:     "verbose",
-        ty:      Type::Bool,
-        default: Some(false),
-        env:     Some(Env::new("LAB_AGENT_VERBOSE")),
-        arg:     Some(Arg { negatable: false, ..Arg::pair("verbose", 'v') }),
-        summary: "Print extra diagnostic output",
-        ..Input::EMPTY
-    };
-}
+use contract::{Command, Contract};
 
 fn main() -> Result<()> {
     let argv: Vec<String> = std::env::args().collect();
     let sub = argv.get(1).map(String::as_str).unwrap_or("");
 
-    // root-exec passes its own argv straight to exec(); it is not a set of typed options, it
-    // *is* the command to run, so it bypasses the argenv model entirely.
-    if sub == "root-exec" {
-        return root_exec(&argv[2..]);
-    }
-    if sub == "--version" {
+    if matches!(sub, "--version" | "-V") {
         println!("lab-agent {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
     }
-
-    let rest: Vec<String> = argv.iter().skip(2).cloned().collect();
-    let resolved = Invocation {
-        args: &rest,
-        env: &ProcessEnv,
+    if matches!(sub, "" | "help" | "--help" | "-h") {
+        print_help();
+        return Ok(());
     }
-    .resolve(&Contract::records());
-    let verbose = Contract::VERBOSE
+    let Some(command) = Command::parse(sub) else {
+        eprintln!("unknown subcommand '{sub}'\n");
+        print_help();
+        std::process::exit(2);
+    };
+
+    // root-exec hands its own argv straight to exec(); it is not a set of typed options, it *is*
+    // the command to run, so it bypasses the argenv model entirely.
+    if command == Command::RootExec {
+        return root_exec(&argv[2..]);
+    }
+
+    // One call: resolve argv and env against the contract, lint it (misspelled flags, flags given
+    // to a subcommand they do not belong to) and exit 1 with a clear message on an error.
+    let resolved = Contract::parse_and_lint(OnProblems::FailOnError);
+    if Contract::VERBOSE
         .get_from_or_default(&resolved)
-        .unwrap_or(false);
-    if verbose {
+        .unwrap_or(false)
+    {
         std::env::set_var("LAB_AGENT_VERBOSE", "1");
     }
 
-    match sub {
-        "connect" => connect::run(),
-        "run" => {
-            let cfg = config::load()?;
-            let token = config::load_token()?;
-            daemon::run(cfg, token)
-        }
-        "monitor" => {
-            let cfg = config::load()?;
-            let token = config::load_token()?;
-            monitor::run(cfg, token)
-        }
-        "" | "help" | "--help" | "-h" => {
-            print_help();
-            Ok(())
-        }
-        other => {
-            eprintln!("unknown subcommand '{other}'\n");
-            print_help();
-            std::process::exit(2);
-        }
+    match command {
+        Command::Connect => connect::run(),
+        Command::Run => daemon::run(config::load()?, config::load_token()?),
+        Command::Monitor => monitor::run(config::load()?, config::load_token()?),
+        Command::Jobs => jobs::run(config::load()?, config::load_token()?, &resolved),
+        Command::SelfUpdate => self_update::run(),
+        Command::Completions => completions::completions(&resolved),
+        Command::Man => completions::man(),
+        Command::RootExec => unreachable!("handled above"),
     }
 }
 
+/// The subcommand list comes from the contract, so help cannot drift from what is accepted.
 fn print_help() {
     println!(
         "lab-agent - pull-based job runner: polls a git repo for jobs, runs them on real \
-         hardware, reports results through git\n\n\
-         USAGE:\n    lab-agent <subcommand> [options]\n\n\
-         SUBCOMMANDS:\n\
-         \u{20}   connect    one-time interactive setup (repos, token, sudo, systemd service)\n\
-         \u{20}   run        the daemon loop (normally started by the systemd service, not by hand)\n\
-         \u{20}   monitor    a TUI listing ongoing and recent jobs\n\
-         \u{20}   root-exec  -- <cmd...>   run a command as root; granted once via `connect`\n\n\
-         OPTIONS:\n    -v, --verbose   extra diagnostic output (env: LAB_AGENT_VERBOSE)\n"
+         hardware, reports results through git\n\nUSAGE:\n    lab-agent <subcommand> [options]\n\n\
+         SUBCOMMANDS:"
+    );
+    for c in Command::ALL {
+        println!("    {:<12} {}", c.token(), c.summary());
+    }
+    println!(
+        "\nOPTIONS:\n    -v, --verbose   extra diagnostic output (env: LAB_AGENT_VERBOSE)\n    \
+         -V, --version   print the version"
     );
 }
 

@@ -143,7 +143,8 @@ fn run_one(shared: &Shared, name: &str, state_dir: &Path) -> Result<()> {
         "lab-agent: starting {job_name} (mode={mode:?}, timeout={}s)",
         timeout.as_secs()
     );
-    push_status(shared, job_name, "running", None)?;
+    let started_at = now_unix();
+    push_status(shared, job_name, "running", None, started_at, None)?;
 
     // A running job is cancelled early only by a *different, newer* preempt-mode job - never by
     // itself, and never just because some other ordinary queued job exists.
@@ -169,18 +170,36 @@ fn run_one(shared: &Shared, name: &str, state_dir: &Path) -> Result<()> {
         "failed"
     };
     println!("lab-agent: {job_name} finished: {status}");
-    push_result(shared, job_name, status, result.exit_code, &log)?;
+    push_result(shared, job_name, status, result.exit_code, started_at, &log)?;
     Ok(())
 }
 
+/// Seconds since the Unix epoch, as a float (fractional seconds), matching how `status.json`
+/// has always recorded timestamps in this project.
+fn now_unix() -> f64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn push_status(
     shared: &Shared,
     job_name: &str,
     status: &str,
     exit_code: Option<i32>,
+    started_at: f64,
+    finished_at: Option<f64>,
 ) -> Result<()> {
     let path = format!("jobs/{job_name}/status.json");
-    let body = serde_json::json!({ "name": job_name, "status": status, "exit_code": exit_code });
+    let body = serde_json::json!({
+        "name": job_name,
+        "status": status,
+        "exit_code": exit_code,
+        "started_at": started_at,
+        "finished_at": finished_at,
+    });
     let existing = shared.client.get_file(
         &shared.cfg.owner,
         &shared.cfg.results_repo,
@@ -199,14 +218,23 @@ fn push_status(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_result(
     shared: &Shared,
     job_name: &str,
     status: &str,
     exit_code: Option<i32>,
+    started_at: f64,
     log: &str,
 ) -> Result<()> {
-    push_status(shared, job_name, status, exit_code)?;
+    push_status(
+        shared,
+        job_name,
+        status,
+        exit_code,
+        started_at,
+        Some(now_unix()),
+    )?;
     let log_path = format!("jobs/{job_name}/log/0000.txt");
     let existing = shared.client.get_file(
         &shared.cfg.owner,
