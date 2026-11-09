@@ -337,7 +337,7 @@ contract! {
     BOARD_ACTION: String, Command = Input {
         key:         "action",
         ty:          Type::Enum,
-        allowed:     &["show", "set", "wait", "pause", "resume", "done", "every", "clear"],
+        allowed:     &["show", "set", "plan", "wait", "pause", "resume", "done", "every", "clear"],
         subcommands: &[Command::Board],
         arg:         Some(Arg { value_name: "ACTION", ..Arg::positional(0) }),
         summary:     "show, set, wait, pause, resume, done, every, clear (none: a live view)",
@@ -395,6 +395,16 @@ contract! {
         ..Input::EMPTY
     };
 
+
+    /// The project a task belongs to.
+    BOARD_PROJECT: String, Command = Input {
+        key:         "project",
+        ty:          Type::String,
+        subcommands: &[Command::Board],
+        arg:         Some(Arg { value_name: "NAME", ..Arg::long("project") }),
+        summary:     "The project the task belongs to (with set or plan)",
+        ..Input::EMPTY
+    };
 
     /// A message to send to the agent (none: show unread messages).
     INBOX_TEXT: String, Command = Input {
@@ -661,5 +671,22 @@ mod tests {
             Some("Go,Not yet".into())
         );
         assert_eq!(Contract::WITHIN.get_from_or_default(&r), Some(120));
+    }
+
+    #[test]
+    fn a_task_can_be_planned_inside_a_project() {
+        let r = resolve(&[
+            "board",
+            "plan",
+            "mic",
+            "test the microphone",
+            "--project",
+            "surya-audio",
+        ]);
+        assert!(lint(&Contract::records(), &r).is_empty());
+        assert_eq!(
+            Contract::BOARD_PROJECT.get_from_or_default(&r),
+            Some("surya-audio".into())
+        );
     }
 }

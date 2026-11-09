@@ -711,7 +711,7 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
                 for reply in &new.replies {
                     if sent.insert(reply.id.clone()) {
                         if seen_once {
-                            let _ = notifier.send(Level::Info, "Claude", &reply.text);
+                            let _ = notifier.send(Level::Info, board::REPLY_TITLE, &reply.text);
                         }
                         let _ = std::fs::write(
                             &sent_path,

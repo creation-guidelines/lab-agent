@@ -54,6 +54,8 @@ struct Scroll {
     tasks: usize,
     jobs: usize,
     talk_back: usize,
+    /// The project shown: 0 is all, then the board's projects in order.
+    project: usize,
 }
 
 /// An offset that keeps a page of `visible` rows inside `total`.
@@ -217,6 +219,9 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 }
                 KeyCode::Char('q') if input.is_empty() => return Ok(()),
                 KeyCode::Tab => scroll.focus = scroll.focus.next(),
+                // left and right switch the project shown (typing is for the reply box)
+                KeyCode::Right => scroll.project += 1,
+                KeyCode::Left => scroll.project = scroll.project.saturating_sub(1),
                 KeyCode::BackTab => scroll.focus = scroll.focus.prev(),
                 KeyCode::Up
                 | KeyCode::Down
@@ -383,6 +388,7 @@ fn look(state: State) -> (&'static str, Style) {
         ),
         State::Ongoing => ("●", Style::default().fg(Color::Yellow)),
         State::Paused => ("‖", Style::default().fg(Color::Blue)),
+        State::Planned => ("○", Style::default().fg(Color::Gray)),
         State::Done => (
             "✓",
             Style::default()
@@ -456,6 +462,27 @@ fn said(line: &Said) -> Line<'static> {
     ])
 }
 
+/// The project tabs and the one selected: "all" first, then each project.
+fn project_tabs(projects: &[String], selected: usize) -> (String, Option<String>) {
+    let selected = selected.min(projects.len());
+    let names: Vec<String> = std::iter::once("all".to_string())
+        .chain(projects.iter().cloned())
+        .collect();
+    let tabs = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            if i == selected {
+                format!("[{n}]")
+            } else {
+                n.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (tabs, (selected > 0).then(|| projects[selected - 1].clone()))
+}
+
 /// A pane's frame: highlighted when focused, with a hint that it scrolls.
 fn frame(title: String, focused: bool) -> Block<'static> {
     let block = Block::default().borders(Borders::ALL);
@@ -488,10 +515,16 @@ fn draw(
             snap.board.live()
         ),
     };
+    // the project shown: tabs in the title, ← → to switch
+    let projects = snap.board.projects();
+    scroll.project = scroll.project.min(projects.len());
+    let (tabs, shown) = project_tabs(&projects, scroll.project);
+    let title = format!("{title}- {tabs} (← →) ");
     let task_rows: Vec<Row> = snap
         .board
         .ordered()
         .into_iter()
+        .filter(|t| shown.is_none() || t.project == shown)
         .map(|t| {
             let (mark, style) = look(t.state);
             Row::new(vec![
@@ -619,13 +652,19 @@ mod tests {
 
     #[test]
     fn every_state_has_its_own_mark_and_color() {
-        let states = [State::Waiting, State::Ongoing, State::Paused, State::Done];
+        let states = [
+            State::Waiting,
+            State::Ongoing,
+            State::Paused,
+            State::Planned,
+            State::Done,
+        ];
         let marks: std::collections::HashSet<&str> = states.iter().map(|s| look(*s).0).collect();
         let colors: std::collections::HashSet<_> = states
             .iter()
             .map(|s| format!("{:?}", look(*s).1.fg))
             .collect();
-        assert_eq!((marks.len(), colors.len()), (4, 4));
+        assert_eq!((marks.len(), colors.len()), (5, 5));
     }
 
     #[test]
@@ -693,6 +732,21 @@ mod tests {
             left,
             [2, 3],
             "filed 'ready' goes; the failed one and the unfiled one stay"
+        );
+    }
+
+    #[test]
+    fn the_project_tabs_start_with_all_and_mark_the_one_shown() {
+        let p = vec!["lab-agent".to_string(), "surya-audio".to_string()];
+        assert_eq!(
+            project_tabs(&p, 0),
+            ("[all] lab-agent surya-audio".to_string(), None)
+        );
+        assert_eq!(project_tabs(&p, 2).1, Some("surya-audio".to_string()));
+        assert_eq!(
+            project_tabs(&p, 9).1,
+            Some("surya-audio".to_string()),
+            "past the end stays on the last"
         );
     }
 }
