@@ -1,7 +1,8 @@
-use crate::config::Config;
+use crate::config;
 use crate::github::Client;
 use crate::jobs::{self, JobRow, JobsCache};
 use anyhow::Result;
+use argenv_resolve::Resolution;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Row, Table};
@@ -14,6 +15,8 @@ use std::time::Duration;
 const FETCH_EVERY: Duration = Duration::from_secs(3);
 /// How often to look when no job is running.
 const IDLE_EVERY: Duration = Duration::from_secs(10);
+/// How often the local view re-reads its own files (free: no network).
+const LOCAL_EVERY: Duration = Duration::from_secs(1);
 /// How long to wait for a key before redrawing anyway (keeps elapsed-time columns ticking and
 /// keeps the UI responsive to quit immediately rather than only after a fetch completes).
 const TICK: Duration = Duration::from_millis(150);
@@ -25,33 +28,51 @@ const TICK: Duration = Duration::from_millis(150);
 /// Fetching happens on its own thread: the event loop never blocks on the network, so the first
 /// frame draws immediately (not after however long the first fetch takes) and a keypress is
 /// handled the moment it arrives, not only once a fetch finishes.
-pub fn run(cfg: Config, token: String) -> Result<()> {
+pub fn run(resolved: &Resolution) -> Result<()> {
     let (rows_tx, rows_rx) = mpsc::channel::<Result<Vec<JobRow>, String>>();
-    thread::spawn(move || {
-        let client = Client::new(token);
-        let mut cache = JobsCache::default();
-        loop {
-            let fetched = jobs::fetch_jobs_cached(&client, &cfg, 30, &mut cache);
-            // Quiet when nothing is running: nothing is going to change.
-            let busy = fetched
-                .as_ref()
-                .is_ok_and(|rows| rows.iter().any(|r| r.status == "running" && !r.stale));
-            // A spent budget will not return sooner for being asked again.
-            let pause = match &fetched {
-                Err(e) => e
-                    .downcast_ref::<crate::github::RateLimited>()
-                    .map_or(FETCH_EVERY, |l| l.wait().min(IDLE_EVERY)),
-                Ok(_) if busy => FETCH_EVERY,
-                Ok(_) => IDLE_EVERY,
-            };
-            let result = fetched.map_err(|e| e.to_string());
-            // The receiver is gone once the UI exits; stop fetching rather than error forever.
-            if rows_tx.send(result).is_err() {
-                return;
-            }
-            thread::sleep(pause);
+    let label = match jobs::source(resolved) {
+        jobs::Source::Local(dir) => {
+            // On the machine that runs the agent its own records are the truth: reading them is
+            // instant and costs no request, so it can refresh every second and works while GitHub
+            // is refusing us.
+            thread::spawn(move || loop {
+                if rows_tx.send(Ok(jobs::local_rows(&dir, 30))).is_err() {
+                    return;
+                }
+                thread::sleep(LOCAL_EVERY);
+            });
+            "this machine"
         }
-    });
+        jobs::Source::Remote => {
+            let (cfg, token) = (config::load()?, config::load_token()?);
+            thread::spawn(move || {
+                let client = Client::new(token);
+                let mut cache = JobsCache::default();
+                loop {
+                    let fetched = jobs::fetch_jobs_cached(&client, &cfg, 30, &mut cache);
+                    // Quiet when nothing is running: nothing is going to change.
+                    let busy = fetched
+                        .as_ref()
+                        .is_ok_and(|rows| rows.iter().any(|r| r.status == "running" && !r.stale));
+                    // A spent budget will not return sooner for being asked again.
+                    let pause = match &fetched {
+                        Err(e) => e
+                            .downcast_ref::<crate::github::RateLimited>()
+                            .map_or(FETCH_EVERY, |l| l.wait().min(IDLE_EVERY)),
+                        Ok(_) if busy => FETCH_EVERY,
+                        Ok(_) => IDLE_EVERY,
+                    };
+                    let result = fetched.map_err(|e| e.to_string());
+                    // The receiver is gone once the UI exits; stop fetching rather than error forever.
+                    if rows_tx.send(result).is_err() {
+                        return;
+                    }
+                    thread::sleep(pause);
+                }
+            });
+            "GitHub"
+        }
+    };
 
     let mut terminal = ratatui::try_init()?;
     let mut rows: Vec<JobRow> = Vec::new();
@@ -72,7 +93,7 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
                 }
             }
 
-            terminal.draw(|frame| draw(frame, &rows, error.as_deref(), loading))?;
+            terminal.draw(|frame| draw(frame, &rows, error.as_deref(), loading, label))?;
 
             if event::poll(TICK)? {
                 if let Event::Key(key) = event::read()? {
@@ -93,14 +114,14 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
     result
 }
 
-fn draw(frame: &mut Frame, rows: &[JobRow], error: Option<&str>, loading: bool) {
+fn draw(frame: &mut Frame, rows: &[JobRow], error: Option<&str>, loading: bool, label: &str) {
     let area = frame.area();
     let title = if loading {
-        " lab-agent monitor - loading... (q to quit) ".to_string()
+        format!(" lab-agent monitor ({label}) - loading... (q to quit) ")
     } else if let Some(e) = error {
-        format!(" lab-agent monitor - last fetch failed: {e} (q to quit) ")
+        format!(" lab-agent monitor ({label}) - last fetch failed: {e} (q to quit) ")
     } else {
-        " lab-agent monitor - q to quit ".to_string()
+        format!(" lab-agent monitor ({label}) - q to quit ")
     };
 
     let header = Row::new(vec![

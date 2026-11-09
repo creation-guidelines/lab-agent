@@ -72,8 +72,8 @@ fn run() -> Result<()> {
     match command {
         Command::Connect => connect::run(),
         Command::Run => daemon::run(config::load()?, config::load_token()?),
-        Command::Monitor => monitor::run(config::load()?, config::load_token()?),
-        Command::Jobs => jobs::run(config::load()?, config::load_token()?, &resolved),
+        Command::Monitor => monitor::run(&resolved),
+        Command::Jobs => jobs::run(&resolved),
         Command::Submit => std::process::exit(agent::submit(&resolved)?),
         Command::Wait => std::process::exit(agent::wait(&resolved)?),
         Command::Logs => std::process::exit(agent::logs(&resolved)?),

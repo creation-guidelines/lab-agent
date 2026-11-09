@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::contract::Contract;
 use crate::github::{Client, Fetched, Listed};
 use anyhow::Result;
@@ -45,7 +45,7 @@ fn now_unix() -> f64 {
         .as_secs_f64()
 }
 
-pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
+pub fn run(resolved: &Resolution) -> Result<()> {
     let count = Contract::JOBS_COUNT
         .get_from_or_default(resolved)
         .unwrap_or(20);
@@ -53,8 +53,18 @@ pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
         .get_from_or_default(resolved)
         .unwrap_or(false);
 
-    let client = Client::new(token);
-    let rows = fetch_jobs(&client, &cfg, count as usize)?;
+    let rows = match source(resolved) {
+        Source::Local(dir) => {
+            if !json {
+                eprintln!("(this machine's own state; --remote reads GitHub)");
+            }
+            local_rows(&dir, count as usize)
+        }
+        Source::Remote => {
+            let (cfg, client) = (config::load()?, Client::new(config::load_token()?));
+            fetch_jobs(&client, &cfg, count as usize)?
+        }
+    };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -95,6 +105,70 @@ pub fn run(cfg: Config, token: String, resolved: &Resolution) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Where job state is read from.
+pub enum Source {
+    /// This machine's own state directory: no network, no token, and it works while GitHub is
+    /// unreachable or refusing.
+    Local(std::path::PathBuf),
+    /// The results repo on GitHub: the way for anything that is not the machine running the agent.
+    Remote,
+}
+
+/// Local state when this machine runs the agent (its state directory holds job records), unless
+/// `--remote` asks for GitHub.
+pub fn source(resolved: &Resolution) -> Source {
+    let dir = crate::daemon::state_dir();
+    let remote = Contract::REMOTE
+        .get_from_or_default(resolved)
+        .unwrap_or(false);
+    if remote || !has_local_state(&dir) {
+        Source::Remote
+    } else {
+        Source::Local(dir)
+    }
+}
+
+fn is_record(name: &str) -> bool {
+    name.ends_with(".status.json")
+}
+
+pub fn has_local_state(dir: &std::path::Path) -> bool {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_str().is_some_and(is_record))
+        })
+        .unwrap_or(false)
+}
+
+/// The `count` newest jobs the agent on this machine has recorded, newest first.
+pub fn local_rows(dir: &std::path::Path, count: usize) -> Vec<JobRow> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".status.json")
+                .map(str::to_string)
+        })
+        .collect();
+    names.sort();
+    names.reverse();
+    names.truncate(count);
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let bytes = std::fs::read(dir.join(format!("{name}.status.json"))).ok()?;
+            let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+            Some(row_from_status(name, &v))
+        })
+        .collect()
 }
 
 /// Lists the `count` most recent jobs from the results repo with their status and timestamps.

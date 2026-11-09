@@ -126,6 +126,7 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
 
     let state_dir = state_dir();
     std::fs::create_dir_all(&state_dir)?;
+    prune_state(&state_dir, KEEP_LOCAL);
     let mut claimed = already_handled(&shared, &state_dir)?;
 
     println!(
@@ -194,6 +195,15 @@ fn already_handled(shared: &Shared, state_dir: &Path) -> Result<HashSet<String>>
                 "lab-agent: {name} was running when the agent stopped: recording it as interrupted"
             );
             let timeout = v["timeout"].as_u64().unwrap_or(0);
+            record_local(
+                state_dir,
+                name,
+                "interrupted",
+                None,
+                started,
+                Some(now_unix()),
+                timeout,
+            );
             let _ = push_status(
                 shared,
                 name,
@@ -322,6 +332,15 @@ fn run_one(
     // A job that removes the state directory must not stop the next one from logging.
     std::fs::create_dir_all(state_dir)?;
     let started_at = now_unix();
+    record_local(
+        state_dir,
+        job_name,
+        "running",
+        None,
+        started_at,
+        None,
+        timeout.as_secs(),
+    );
     // A failed status push must not stop the job itself from running.
     if let Err(e) = push_status(
         shared,
@@ -382,6 +401,15 @@ fn run_one(
         finished_at: now_unix(),
         timeout_secs: timeout.as_secs(),
     };
+    record_local(
+        state_dir,
+        job_name,
+        &done.status,
+        done.exit_code,
+        done.started_at,
+        Some(done.finished_at),
+        done.timeout_secs,
+    );
     // The outcome goes to disk first and to GitHub second: it must survive a failed push, a
     // spent budget and a restart. The marker stays until GitHub has the result.
     lock(&shared.in_flight).insert(job_name.to_string());
@@ -438,6 +466,82 @@ fn now_unix() -> f64 {
         .as_secs_f64()
 }
 
+/// A job's `status.json`: the same document goes to GitHub and, next to the job's log, to this
+/// machine's own state directory, so a viewer on the machine needs no network at all.
+fn status_json(
+    job_name: &str,
+    status: &str,
+    exit_code: Option<i32>,
+    started_at: f64,
+    finished_at: Option<f64>,
+    timeout_secs: u64,
+) -> serde_json::Value {
+    serde_json::json!({
+        "name": job_name,
+        "status": status,
+        "exit_code": exit_code,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "timeout": timeout_secs,
+    })
+}
+
+/// Keeps `<job>.status.json` in the state directory current (written atomically). Best effort: a
+/// failure here must never stop a job or its push.
+fn record_local(
+    state_dir: &Path,
+    job_name: &str,
+    status: &str,
+    exit_code: Option<i32>,
+    started_at: f64,
+    finished_at: Option<f64>,
+    timeout_secs: u64,
+) {
+    let body = status_json(
+        job_name,
+        status,
+        exit_code,
+        started_at,
+        finished_at,
+        timeout_secs,
+    );
+    let path = state_dir.join(format!("{job_name}.status.json"));
+    let tmp = path.with_extension("json.tmp");
+    let written = serde_json::to_vec_pretty(&body)
+        .map_err(anyhow::Error::from)
+        .and_then(|bytes| std::fs::write(&tmp, bytes).map_err(Into::into))
+        .and_then(|()| std::fs::rename(&tmp, &path).map_err(Into::into));
+    if let Err(e) = written {
+        eprintln!("lab-agent: could not record {job_name} locally: {e:#}");
+    }
+}
+
+/// Keeps the newest `keep` jobs' local files (status and log) and removes older ones, so the
+/// state directory does not grow for ever. Outcome markers of unsent results are never removed.
+fn prune_state(state_dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(state_dir) else {
+        return;
+    };
+    let mut jobs: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".status.json")
+                .map(str::to_string)
+        })
+        .collect();
+    jobs.sort();
+    jobs.reverse(); // newest first (job names start with a time)
+    for old in jobs.into_iter().skip(keep) {
+        if done_path(state_dir, &old).exists() {
+            continue;
+        }
+        let _ = std::fs::remove_file(state_dir.join(format!("{old}.status.json")));
+        let _ = std::fs::remove_file(state_dir.join(format!("{old}.log")));
+    }
+}
+
 fn push_status(
     shared: &Shared,
     job_name: &str,
@@ -449,14 +553,14 @@ fn push_status(
 ) -> Result<()> {
     let cfg = &shared.cfg;
     let path = format!("jobs/{job_name}/status.json");
-    let body = serde_json::to_vec_pretty(&serde_json::json!({
-        "name": job_name,
-        "status": status,
-        "exit_code": exit_code,
-        "started_at": started_at,
-        "finished_at": finished_at,
-        "timeout": timeout_secs,
-    }))?;
+    let body = serde_json::to_vec_pretty(&status_json(
+        job_name,
+        status,
+        exit_code,
+        started_at,
+        finished_at,
+        timeout_secs,
+    ))?;
     with_retry(shared, &format!("{job_name} status"), || {
         let existing =
             shared
@@ -475,6 +579,8 @@ fn push_status(
     })
 }
 
+/// How many jobs' local files (status and log) the agent keeps.
+const KEEP_LOCAL: usize = 200;
 /// How many of the newest results a starting agent reads to find jobs that were cut off.
 const RECENT_TO_CHECK: usize = 20;
 /// How often a running job's log so far is pushed.
@@ -692,5 +798,46 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(done_path(&dir, "2-job"), b"{\"status\":\"o").unwrap();
         assert_eq!(read_done(&done_path(&dir, "2-job")), None);
+    }
+
+    #[test]
+    fn a_local_record_reads_back_as_a_job_row() {
+        let dir = std::env::temp_dir().join(format!("lab-agent-local-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        record_local(&dir, "100-a", "ok", Some(0), 1.0, Some(3.0), 60);
+        let rows = crate::jobs::local_rows(&dir, 10);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (
+                rows[0].name.as_str(),
+                rows[0].status.as_str(),
+                rows[0].timeout_secs
+            ),
+            ("100-a", "ok", Some(60))
+        );
+        assert!(
+            !dir.join("100-a.status.json.tmp").exists() && !dir.join("100-a.json.tmp").exists()
+        );
+    }
+
+    #[test]
+    fn pruning_keeps_the_newest_and_never_an_unsent_result() {
+        let dir = std::env::temp_dir().join(format!("lab-agent-prune-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for n in ["1-a", "2-b", "3-c"] {
+            record_local(&dir, n, "ok", Some(0), 1.0, Some(2.0), 60);
+            std::fs::write(dir.join(format!("{n}.log")), b"x").unwrap();
+        }
+        std::fs::write(done_path(&dir, "1-a"), b"{}").unwrap(); // 1-a is still waiting to be pushed
+        prune_state(&dir, 1);
+        assert!(dir.join("3-c.status.json").exists(), "the newest stays");
+        assert!(
+            !dir.join("2-b.status.json").exists() && !dir.join("2-b.log").exists(),
+            "an old one goes"
+        );
+        assert!(
+            dir.join("1-a.status.json").exists(),
+            "an unsent result is never pruned"
+        );
     }
 }
