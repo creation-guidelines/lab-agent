@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.15]
+
+
+### Bug Fixes
+- Board wait/pause/resume/done changed nothing ([#42](https://github.com/creation-guidelines/lab-agent/pull/42)) ([6b85e85])
+
+
+
 ## [0.1.14]
 
 
