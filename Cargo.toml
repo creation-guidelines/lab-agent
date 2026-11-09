@@ -1,6 +1,6 @@
 [package]
 name = "lab-agent"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2021"
 description = "Pull-based job runner: polls a git repo for jobs, runs them on real hardware, reports results through git."
 license = "MIT"
