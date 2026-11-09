@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.4]
+
+
+### Features
+- One argenv contract; completions and man page generated from it; jobs, self-update, live monitor ([#17](https://github.com/creation-guidelines/lab-agent/pull/17)) ([8a93419])
+
+
+
 ## [0.1.3]
 
 
