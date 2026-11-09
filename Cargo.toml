@@ -34,7 +34,7 @@ extended-description = """\
 A pull-based job runner for hardware-in-the-loop work: polls a git repo for \
 job scripts, runs them on whatever machine it's installed on, and reports \
 results through git."""
-depends = "$auto, ca-certificates"
+depends = "ca-certificates"
 section = "utils"
 priority = "optional"
 assets = [
@@ -53,9 +53,6 @@ assets = [
 name = "lab-agent"
 summary = "Pull-based job runner for hardware-in-the-loop work"
 
-[package.metadata.generate-rpm.requires]
-ca-certificates = "*"
-
 assets = [
     { source = "target/release/lab-agent", dest = "/usr/bin/lab-agent", mode = "755" },
     { source = "README.md", dest = "/usr/share/doc/lab-agent/README.md", mode = "644", doc = true },
@@ -67,3 +64,6 @@ assets = [
     { source = "packaging/generated/lab-agent.nu", dest = "/usr/share/nushell/vendor/autoload/lab-agent.nu", mode = "644" },
     { source = "packaging/generated/lab-agent.1.gz", dest = "/usr/share/man/man1/lab-agent.1.gz", mode = "644", doc = true },
 ]
+
+[package.metadata.generate-rpm.requires]
+ca-certificates = "*"
