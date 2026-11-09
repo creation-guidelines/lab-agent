@@ -27,6 +27,10 @@ pub mod exit {
     pub const TIMED_OUT: i32 = 124;
     /// The job was cancelled (preempted by another job) or cut off by an agent restart.
     pub const CANCELLED: i32 = 125;
+    /// GitHub's hourly request budget is used up (it is per user, shared by every token). Nothing
+    /// is lost: a submitted job still runs, and `wait` can be run again once the budget returns.
+    /// Same as `EX_UNAVAILABLE`.
+    pub const RATE_LIMITED: i32 = 69;
 }
 
 pub fn exit_code(row: &JobRow) -> i32 {

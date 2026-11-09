@@ -103,6 +103,7 @@ from `--mode` / `--timeout`:
 | `75` | `--within` elapsed; the job may still finish (also: never picked up - is the agent running?) |
 | `124` | the job hit its own `timeout` (as `timeout(1)`) |
 | `125` | the job was cancelled (preempted) or cut off by an agent restart (`interrupted`) |
+| `69` | GitHub's hourly request budget is used up; nothing is lost - the job still runs, run `wait` again later |
 
 **`--json` shapes.** `submit` (no `--wait`): `{"name": ID, "file": "jobs/ID.sh"}`. `wait` and
 `submit --wait`: `{"name", "status", "exit_code", "started_at", "finished_at", "elapsed_secs",
@@ -118,6 +119,11 @@ from `--mode` / `--timeout`:
   path, and `connect` granted that one line once.
 - Scripts live in a git repo and logs in another: **do not put secrets in a script or print one**.
 - A log longer than 900 KB keeps its tail (GitHub's contents API serves files up to 1 MB).
+- **The budget is GitHub's, per user.** 5000 REST requests an hour, shared by *every* token of the
+  same user, so a busy session elsewhere can starve the agent (and the agent's own polling counts).
+  The daemon's idle polling costs nothing (conditional requests: a 'not modified' answer is free);
+  when the budget runs out it pauses until it returns and waits for it before giving up on a
+  result, so a finished job's output is not lost. `lab-agent` exits `69` and says when it returns.
 - Polling is cheap: reads are conditional (ETag), and a "not modified" answer does not count
   against GitHub's rate limit. Writes are one commit each; do not submit in a tight loop.
 - Prefer `submit --wait --json` for one-shot work and `submit` then `wait` for long work, so a
