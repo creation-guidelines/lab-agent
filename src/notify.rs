@@ -125,6 +125,43 @@ impl Notifier {
     }
 }
 
+/// A link the ntfy Android app opens itself, subscribing to the topic (an `https://` link opens the
+/// web app instead: Android cannot hand those to an app reliably).
+fn deep_link(server: &str, topic: &str, display: &str) -> String {
+    let server = server.trim_end_matches('/');
+    let (host, secure) = match server.strip_prefix("https://") {
+        Some(host) => (host, true),
+        None => (server.strip_prefix("http://").unwrap_or(server), false),
+    };
+    let display: String = display
+        .chars()
+        .map(|c| match c {
+            ' ' => "+".to_string(),
+            c if c.is_ascii_alphanumeric() || "-_.".contains(c) => c.to_string(),
+            c => c.to_string().bytes().map(|b| format!("%{b:02X}")).collect(),
+        })
+        .collect();
+    let mut link = format!("ntfy://{host}/{topic}?display={display}");
+    if !secure {
+        link.push_str("&secure=false");
+    }
+    link
+}
+
+/// `text` as a QR code drawn with block characters, to scan with the phone's camera.
+fn qr(text: &str) -> Option<String> {
+    let code = qrcode::QrCode::new(text.as_bytes()).ok()?;
+    Some(
+        // Drawn for a dark terminal, the way qrencode does it: a block is a *light* module, so on a
+        // dark background the code has the polarity a phone camera expects.
+        code.render::<qrcode::render::unicode::Dense1x2>()
+            .dark_color(qrcode::render::unicode::Dense1x2::Light)
+            .light_color(qrcode::render::unicode::Dense1x2::Dark)
+            .quiet_zone(true)
+            .build(),
+    )
+}
+
 /// HTTP headers carry ASCII: anything else in a title is shown as `?` rather than failing.
 fn ascii(text: &str) -> String {
     text.chars()
@@ -238,16 +275,23 @@ pub fn setup() -> Result<()> {
         }
     }
     println!(
-        "\nOn your phone, in the ntfy app, subscribe to both (or open these links on the phone):\n  \
-         info:   {s}/{i}\n  urgent: {s}/{u}\n          in its settings, set the minimum priority to \
-         max so it rings through Do Not Disturb\n\nThese two names are the secret: anyone who \
-         knows one can read it, so keep them to yourself.\nOn the public ntfy.sh, messages are \
-         not encrypted; for that, use your own ntfy server or one with access tokens.\n\nSend \
-         from a script or a job:\n  lab-agent notify \"text\"\n  lab-agent notify --urgent \
-         \"text\"\n  lab-agent submit --notify job.sh   (tells you how the job ended)",
-        s = cfg.server,
-        i = cfg.info_topic,
-        u = cfg.urgent_topic
+        "\nOn your phone (ntfy app installed): scan each code with the camera, or open the link on"
+    );
+    println!("the phone - the app subscribes by itself. Do not use the + button: it suggests a new name.");
+    for (name, topic) in [("info", &cfg.info_topic), ("urgent", &cfg.urgent_topic)] {
+        let link = deep_link(&cfg.server, topic, &format!("lab-agent {name}"));
+        println!(
+            "\n{name}:\n{}{link}",
+            qr(&link).map(|q| q + "\n").unwrap_or_default()
+        );
+    }
+    println!(
+        "\nTo let urgent messages ring through Do Not Disturb, in Android: Settings > Apps > ntfy >\n\
+         Notifications > the \"Max priority\" category > allow it to override Do Not Disturb.\n\n\
+         These two names are the secret: anyone who knows one can read it, so keep them to yourself.\n\
+         On the public ntfy.sh, messages are not encrypted; for that, use your own ntfy server or one\n\
+         with access tokens.\n\nSend from a script or a job:\n  lab-agent notify \"text\"\n  \
+         lab-agent notify --urgent \"text\"\n  lab-agent submit --notify job.sh   (tells you how the job ended)"
     );
     Ok(())
 }
@@ -270,6 +314,48 @@ mod tests {
         assert!(random
             .bytes()
             .all(|c| c.is_ascii_lowercase() || (b'2'..=b'7').contains(&c)));
+    }
+
+    #[test]
+    fn the_phone_link_opens_the_app_not_the_web() {
+        assert_eq!(
+            deep_link("https://ntfy.sh/", "labagent-info-x", "lab-agent info"),
+            "ntfy://ntfy.sh/labagent-info-x?display=lab-agent+info"
+        );
+        assert_eq!(
+            deep_link("http://ntfy.home:8080", "t", "a&b"),
+            "ntfy://ntfy.home:8080/t?display=a%26b&secure=false"
+        );
+    }
+
+    #[test]
+    fn the_printed_code_scans_back_to_the_link_on_a_dark_terminal() {
+        let link = "ntfy://ntfy.sh/labagent-info-abcdefghijklmnopqrstuvwx?display=lab-agent+info";
+        let printed = qr(link).unwrap();
+        // What a dark terminal shows: a block character is lit, a space stays dark, and each
+        // character is two pixels high (top half, bottom half). Scale it up and decode it the
+        // way a camera would.
+        let rows: Vec<Vec<char>> = printed.lines().map(|l| l.chars().collect()).collect();
+        let (w, h, scale) = (rows[0].len(), rows.len() * 2, 6);
+        let lit = |x: usize, y: usize| -> bool {
+            match rows[y / 2].get(x).copied().unwrap_or(' ') {
+                '\u{2588}' => true,
+                '\u{2580}' => y % 2 == 0,
+                '\u{2584}' => y % 2 == 1,
+                _ => false,
+            }
+        };
+        let mut img = rqrr::PreparedImage::prepare_from_greyscale(w * scale, h * scale, |x, y| {
+            if lit(x / scale, y / scale) {
+                255
+            } else {
+                0
+            }
+        });
+        let grids = img.detect_grids();
+        assert_eq!(grids.len(), 1, "exactly one code must be found");
+        let (_, content) = grids[0].decode().expect("the code decodes");
+        assert_eq!(content, link);
     }
 
     #[test]

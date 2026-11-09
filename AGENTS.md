@@ -152,6 +152,10 @@ names are 120-bit random strings made on that user's machine and kept only in `n
 (mode 0600) beside the config - they are the secret, so never put one in a flag, a log, a script
 or a repo. Nobody shares a channel: two users of lab-agent never see each other's messages.
 
+- On the phone, subscribe by scanning the QR codes `notify-setup` prints (or opening its `ntfy://`
+  links on the phone): the app's `+` button suggests a new random name, and an `https://` link opens
+  the web app. Urgent ringing through Do Not Disturb is an Android setting: Settings > Apps > ntfy >
+  Notifications > "Max priority" > override Do Not Disturb.
 - `lab-agent notify "text"` / `lab-agent notify --urgent "text"` sends from the machine it runs on.
 - `lab-agent submit --notify job.sh` (or `notify=yes` in the `# lab:` header) makes the agent tell
   the phone how the job ended: info if it succeeded, urgent if not, with its last lines.
