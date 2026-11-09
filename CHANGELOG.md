@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.13]
+
+
+### Features
+- The board and the inbox - follow a long session from the phone, and speak into it ([#37](https://github.com/creation-guidelines/lab-agent/pull/37)) ([6de0f8c])
+
+
+
 ## [0.1.12]
 
 
