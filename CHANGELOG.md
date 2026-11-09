@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.7]
+
+
+### Miscellaneous
+- A pinned, flake-free nix-shell development environment ([#24](https://github.com/creation-guidelines/lab-agent/pull/24)) ([3f62ea2])
+
+
+
 ## [0.1.6]
 
 
