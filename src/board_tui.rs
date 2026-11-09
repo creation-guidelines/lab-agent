@@ -1,5 +1,6 @@
 //! The control board: what the agent is doing, the jobs, and the conversation with a reply box -
 //! one live view of the whole system. `q` quits (when the reply box is empty), Ctrl-C always.
+//! Tab moves between the panes; arrows, PgUp/PgDn and Home/End scroll the focused one.
 //!
 //! The layout follows the window: side by side when wide (a desktop), a 2x2 grid when roughly
 //! square (a tiling window manager), stacked when tall (a phone). On the machine that runs the
@@ -22,6 +23,43 @@ use std::time::Duration;
 const LOCAL_EVERY: Duration = Duration::from_secs(2);
 const REMOTE_EVERY: Duration = Duration::from_secs(5);
 const TICK: Duration = Duration::from_millis(100);
+
+/// The pane that scrolls when the arrow keys are pressed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum Pane {
+    #[default]
+    Talk,
+    Tasks,
+    Jobs,
+}
+
+impl Pane {
+    fn next(self) -> Pane {
+        match self {
+            Pane::Talk => Pane::Tasks,
+            Pane::Tasks => Pane::Jobs,
+            Pane::Jobs => Pane::Talk,
+        }
+    }
+    fn prev(self) -> Pane {
+        self.next().next()
+    }
+}
+
+/// Where each pane is scrolled to. Tasks and jobs count rows from the top; the conversation counts
+/// from the bottom, so that at 0 it follows new messages.
+#[derive(Default, Clone, Copy, Debug)]
+struct Scroll {
+    focus: Pane,
+    tasks: usize,
+    jobs: usize,
+    talk_back: usize,
+}
+
+/// An offset that keeps a page of `visible` rows inside `total`.
+fn clamp_offset(offset: usize, total: usize, visible: usize) -> usize {
+    offset.min(total.saturating_sub(visible))
+}
 
 #[derive(Default, Clone)]
 struct Snapshot {
@@ -98,6 +136,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
     }
 
     let (status_tx, status_rx) = mpsc::channel::<String>();
+    let mut scroll = Scroll::default();
     let mut terminal = ratatui::try_init()?;
     let (mut snap, mut error, mut input, mut status) = (
         Snapshot::default(),
@@ -119,7 +158,17 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             while let Ok(s) = status_rx.try_recv() {
                 status = s;
             }
-            terminal.draw(|f| draw(f, &snap, error.as_deref(), source, &input, &status))?;
+            terminal.draw(|f| {
+                draw(
+                    f,
+                    &snap,
+                    error.as_deref(),
+                    source,
+                    &input,
+                    &status,
+                    &mut scroll,
+                )
+            })?;
             if !event::poll(TICK)? {
                 continue;
             }
@@ -134,6 +183,30 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     return Ok(())
                 }
                 KeyCode::Char('q') if input.is_empty() => return Ok(()),
+                KeyCode::Tab => scroll.focus = scroll.focus.next(),
+                KeyCode::BackTab => scroll.focus = scroll.focus.prev(),
+                KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::Home
+                | KeyCode::End => {
+                    let step: isize = match key.code {
+                        KeyCode::Up => -1,
+                        KeyCode::Down => 1,
+                        KeyCode::PageUp => -10,
+                        KeyCode::PageDown => 10,
+                        KeyCode::Home => -100_000,
+                        _ => 100_000,
+                    };
+                    let move_by = |v: usize, d: isize| (v as isize + d).max(0) as usize;
+                    match scroll.focus {
+                        Pane::Tasks => scroll.tasks = move_by(scroll.tasks, step),
+                        Pane::Jobs => scroll.jobs = move_by(scroll.jobs, step),
+                        // the conversation is measured from its end: up goes back in time
+                        Pane::Talk => scroll.talk_back = move_by(scroll.talk_back, -step),
+                    }
+                }
                 KeyCode::Char(c) => input.push(c),
                 KeyCode::Backspace => {
                     input.pop();
@@ -317,6 +390,18 @@ fn said(line: &Said) -> Line<'static> {
     ])
 }
 
+/// A pane's frame: highlighted when focused, with a hint that it scrolls.
+fn frame(title: String, focused: bool) -> Block<'static> {
+    let block = Block::default().borders(Borders::ALL);
+    if focused {
+        block
+            .title(format!("{title}[↑↓ PgUp PgDn] "))
+            .border_style(Style::default().fg(Color::Cyan))
+    } else {
+        block.title(title)
+    }
+}
+
 fn draw(
     f: &mut Frame,
     snap: &Snapshot,
@@ -324,6 +409,7 @@ fn draw(
     source: &str,
     input: &str,
     status: &str,
+    scroll: &mut Scroll,
 ) {
     // the box's width does not depend on its height: measure with one row, then grow it
     let width = layout(f.area(), 3).input.width;
@@ -358,7 +444,7 @@ fn draw(
                 Constraint::Length(15),
             ],
         )
-        .block(Block::default().borders(Borders::ALL).title(title)),
+        .block(frame(title, scroll.focus == Pane::Tasks)),
         a.tasks,
     );
     let job_rows: Vec<Row> = snap
@@ -394,7 +480,7 @@ fn draw(
                 Constraint::Length(7),
             ],
         )
-        .block(Block::default().borders(Borders::ALL).title(" jobs ")),
+        .block(frame(" jobs ".into(), scroll.focus == Pane::Jobs)),
         a.jobs,
     );
     // the conversation, newest at the bottom: scroll so the end is in view
@@ -405,16 +491,18 @@ fn draw(
     let width = a.talk.width.saturating_sub(2).max(1) as usize;
     let rows: usize = lines.iter().map(|l| l.width().div_ceil(width).max(1)).sum();
     let visible = a.talk.height.saturating_sub(2) as usize;
-    let scroll = rows.saturating_sub(visible) as u16;
+    scroll.talk_back = clamp_offset(scroll.talk_back, rows, visible);
+    let top = rows
+        .saturating_sub(visible)
+        .saturating_sub(scroll.talk_back) as u16;
     f.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: false })
-            .scroll((scroll, 0))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" conversation "),
-            ),
+            .scroll((top, 0))
+            .block(frame(
+                " conversation (Tab: next pane) ".into(),
+                scroll.focus == Pane::Talk,
+            )),
         a.talk,
     );
     let hint = if status.is_empty() {
@@ -492,5 +580,26 @@ mod tests {
             grown.input.height == 8 && grown.talk.height < small.talk.height,
             "the conversation gives up the room"
         );
+    }
+
+    #[test]
+    fn scrolling_stops_at_the_ends() {
+        assert_eq!(clamp_offset(0, 30, 10), 0);
+        assert_eq!(clamp_offset(25, 30, 10), 20, "the last page stays full");
+        assert_eq!(
+            clamp_offset(5, 3, 10),
+            0,
+            "nothing to scroll when it all fits"
+        );
+    }
+
+    #[test]
+    fn tab_visits_every_pane_and_comes_back() {
+        let p = Pane::Talk;
+        assert_eq!(
+            (p.next(), p.next().next(), p.next().next().next()),
+            (Pane::Tasks, Pane::Jobs, Pane::Talk)
+        );
+        assert_eq!(p.prev(), Pane::Jobs);
     }
 }
