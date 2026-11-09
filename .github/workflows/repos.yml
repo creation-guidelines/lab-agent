@@ -157,8 +157,18 @@ jobs:
       - uses: actions/upload-pages-artifact@v5
         with:
           path: site
+      # GitHub's Pages API fails now and then on its side ("fetching artifact metadata failed"); a
+      # second try a minute later succeeds, so the workflow makes it instead of a person.
       - name: Deploy
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: Wait a minute before the second try
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 60
+      - name: Deploy (second try)
+        id: deploy2
+        if: steps.deploy.outcome == 'failure'
         uses: actions/deploy-pages@v5
 
   # The README's repo-pacman snippet, on a real Arch container, against what was just published.
