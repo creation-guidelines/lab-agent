@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.9]
+
+
+### Features
+- A result is never lost to a failed push, and a stale 'running' row says so ([#29](https://github.com/creation-guidelines/lab-agent/pull/29)) ([1fde085])
+
+
+
 ## [0.1.8]
 
 
