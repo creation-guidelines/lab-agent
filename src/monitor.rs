@@ -99,9 +99,9 @@ fn draw(frame: &mut Frame, rows: &[JobRow], error: Option<&str>, loading: bool) 
     let body: Vec<Row> = rows
         .iter()
         .map(|row| {
-            let style = match row.status.as_str() {
+            let style = match row.display_status() {
                 "ok" => Style::default().fg(Color::Green),
-                "failed" | "timed_out" => Style::default().fg(Color::Red),
+                "failed" | "timed_out" | "stale" => Style::default().fg(Color::Red),
                 "running" => Style::default().fg(Color::Yellow),
                 _ => Style::default(),
             };
@@ -119,7 +119,7 @@ fn draw(frame: &mut Frame, rows: &[JobRow], error: Option<&str>, loading: bool) 
                 .unwrap_or_else(|| "-".into());
             Row::new(vec![
                 Cell::from(row.name.clone()),
-                Cell::from(row.status.clone()).style(style),
+                Cell::from(row.display_status().to_string()).style(style),
                 Cell::from(exit),
                 Cell::from(started),
                 Cell::from(elapsed),

@@ -325,6 +325,8 @@ mod tests {
             exit_code,
             started_at: None,
             finished_at: None,
+            timeout_secs: None,
+            stale: false,
         }
     }
 

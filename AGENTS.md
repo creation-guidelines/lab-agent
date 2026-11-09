@@ -109,10 +109,16 @@ from `--mode` / `--timeout`:
 `submit --wait`: `{"name", "status", "exit_code", "started_at", "finished_at", "elapsed_secs",
 "exit", "log"}`, where `status` is one of `running`, `ok`, `failed`, `timed_out`, `preempted`,
 `interrupted`, `exit` is the status the command exits with, and times are Unix seconds.
-`jobs --json`: a list of `{"name", "status", "exit_code", "started_at", "finished_at"}`.
+`jobs --json`: a list of `{"name", "status", "exit_code", "started_at", "finished_at",
+"timeout_secs", "stale"}`. **`stale: true` means the row says `running` but is not a live job**: it
+has outlived its time limit plus two minutes with no result recorded (the agent died, or could not
+push). Treat it as unknown, never as running; `lab-agent jobs` and `monitor` show it as `stale`.
 
 **Rules a caller should know**
 
+- A job's outcome is written to disk the instant it is known and pushed afterwards, and pushed
+  again on every poll until GitHub has it: a failed push or a spent budget delays a result, it does
+  not lose it, and a finished job is not left saying `running`.
 - A job with a result is never run again, whatever happens to the agent. To run something again,
   submit it again (a new id).
 - Root is `sudo -n lab-agent root-exec -- COMMAND ARGS...` inside the script. There is no other

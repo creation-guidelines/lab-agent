@@ -99,6 +99,8 @@ struct Shared {
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// The results branch takes one commit at a time: concurrent writers conflict (HTTP 409).
     push_lock: Mutex<()>,
+    /// Jobs whose outcome is being pushed right now, so the retry pass does not push them twice.
+    in_flight: Mutex<HashSet<String>>,
 }
 
 /// A poisoned lock means another thread panicked, not that the data is wrong; keep going.
@@ -119,11 +121,12 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
         cfg: cfg.clone(),
         running: Mutex::new(HashMap::new()),
         push_lock: Mutex::new(()),
+        in_flight: Mutex::new(HashSet::new()),
     });
 
     let state_dir = state_dir();
     std::fs::create_dir_all(&state_dir)?;
-    let mut claimed = already_handled(&shared)?;
+    let mut claimed = already_handled(&shared, &state_dir)?;
 
     println!(
         "lab-agent {}: polling {}/{} every {}s (max {} job(s) at once); {} job(s) already have results",
@@ -137,6 +140,7 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
 
     let mut state = PollState::default();
     loop {
+        flush_unsent(&shared, &state_dir);
         let pause = match poll_once(&shared, &mut claimed, &state_dir, &mut state) {
             Ok(()) => Duration::from_secs(cfg.poll_seconds),
             // A spent budget is not a transient error: asking again only spends the next hour's too.
@@ -156,7 +160,7 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
 }
 
 /// Every job that already has a result. Any that says `running` was cut off by a restart.
-fn already_handled(shared: &Shared) -> Result<HashSet<String>> {
+fn already_handled(shared: &Shared, state_dir: &Path) -> Result<HashSet<String>> {
     let cfg = &shared.cfg;
     let dirs =
         shared
@@ -175,11 +179,25 @@ fn already_handled(shared: &Shared) -> Result<HashSet<String>> {
         let running =
             v["status"].as_str() == Some("running") || v["running"].as_bool() == Some(true);
         if running {
+            // A finished job whose result is still waiting to be pushed is not an interrupted one:
+            // the retry pass has its real outcome.
+            if done_path(state_dir, name).exists() {
+                continue;
+            }
             let started = v["started_at"].as_f64().unwrap_or_else(now_unix);
             println!(
                 "lab-agent: {name} was running when the agent stopped: recording it as interrupted"
             );
-            let _ = push_status(shared, name, "interrupted", None, started, Some(now_unix()));
+            let timeout = v["timeout"].as_u64().unwrap_or(0);
+            let _ = push_status(
+                shared,
+                name,
+                "interrupted",
+                None,
+                started,
+                Some(now_unix()),
+                timeout,
+            );
         }
     }
     Ok(dirs.into_iter().collect())
@@ -300,7 +318,15 @@ fn run_one(
     std::fs::create_dir_all(state_dir)?;
     let started_at = now_unix();
     // A failed status push must not stop the job itself from running.
-    if let Err(e) = push_status(shared, job_name, "running", None, started_at, None) {
+    if let Err(e) = push_status(
+        shared,
+        job_name,
+        "running",
+        None,
+        started_at,
+        None,
+        timeout.as_secs(),
+    ) {
         eprintln!("lab-agent: could not record {job_name} as running: {e:#}");
     }
 
@@ -344,7 +370,25 @@ fn run_one(
         "failed"
     };
     println!("lab-agent: {job_name} finished: {status}");
-    push_result(shared, job_name, status, result.exit_code, started_at, &log)
+    let done = Done {
+        status: status.to_string(),
+        exit_code: result.exit_code,
+        started_at,
+        finished_at: now_unix(),
+        timeout_secs: timeout.as_secs(),
+    };
+    // The outcome goes to disk first and to GitHub second: it must survive a failed push, a
+    // spent budget and a restart. The marker stays until GitHub has the result.
+    lock(&shared.in_flight).insert(job_name.to_string());
+    if let Err(e) = write_done(state_dir, job_name, &done) {
+        eprintln!("lab-agent: could not keep {job_name}'s outcome on disk: {e:#}");
+    }
+    let pushed = push_done(shared, job_name, &done, &log);
+    if pushed.is_ok() {
+        let _ = std::fs::remove_file(done_path(state_dir, job_name));
+    }
+    lock(&shared.in_flight).remove(job_name);
+    pushed
 }
 
 /// Runs `f` as the only writer to the results branch, trying again a few times: a conflict is
@@ -396,6 +440,7 @@ fn push_status(
     exit_code: Option<i32>,
     started_at: f64,
     finished_at: Option<f64>,
+    timeout_secs: u64,
 ) -> Result<()> {
     let cfg = &shared.cfg;
     let path = format!("jobs/{job_name}/status.json");
@@ -405,6 +450,7 @@ fn push_status(
         "exit_code": exit_code,
         "started_at": started_at,
         "finished_at": finished_at,
+        "timeout": timeout_secs,
     }))?;
     with_retry(shared, &format!("{job_name} status"), || {
         let existing =
@@ -469,24 +515,81 @@ fn push_log(shared: &Shared, job_name: &str, text: &str) -> Result<()> {
     })
 }
 
-fn push_result(
-    shared: &Shared,
-    job_name: &str,
-    status: &str,
+/// A job's outcome, kept on disk until GitHub has it.
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+struct Done {
+    status: String,
     exit_code: Option<i32>,
     started_at: f64,
-    log: &str,
-) -> Result<()> {
+    finished_at: f64,
+    timeout_secs: u64,
+}
+
+fn done_path(state_dir: &Path, job: &str) -> PathBuf {
+    state_dir.join(format!("{job}.done"))
+}
+
+/// Writes the marker atomically (a half-written one would be worse than none).
+fn write_done(state_dir: &Path, job: &str, done: &Done) -> Result<()> {
+    let path = done_path(state_dir, job);
+    let tmp = path.with_extension("done.tmp");
+    std::fs::write(&tmp, serde_json::to_vec(done)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+fn read_done(path: &Path) -> Option<Done> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+fn push_done(shared: &Shared, job_name: &str, done: &Done, log: &str) -> Result<()> {
     // The log first: a result whose status says "finished" must already have its final log.
     push_log(shared, job_name, log).context("the log")?;
     push_status(
         shared,
         job_name,
-        status,
-        exit_code,
-        started_at,
-        Some(now_unix()),
+        &done.status,
+        done.exit_code,
+        done.started_at,
+        Some(done.finished_at),
+        done.timeout_secs,
     )
+}
+
+/// Pushes every outcome that is still only on disk: a job finished while GitHub was unreachable or
+/// the budget was spent. Run before every poll, so a result is never stuck as "running".
+fn flush_unsent(shared: &Shared, state_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(state_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(job) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".done"))
+        else {
+            continue;
+        };
+        if lock(&shared.in_flight).contains(job) {
+            continue;
+        }
+        let Some(done) = read_done(&path) else {
+            eprintln!("lab-agent: {job}: unreadable outcome marker, leaving it");
+            continue;
+        };
+        let log = read_log(&state_dir.join(format!("{job}.log")));
+        match push_done(shared, job, &done, &log) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&path);
+                println!("lab-agent: {job}: pushed the result that could not be pushed earlier");
+            }
+            Err(e) => {
+                eprintln!("lab-agent: {job}: still cannot push its result: {e:#}");
+                break; // the same cause will stop the rest too; try again next poll
+            }
+        }
+    }
 }
 
 pub fn state_dir() -> PathBuf {
@@ -555,5 +658,32 @@ mod tests {
         let p = plan(&[Queue], 0, 1);
         assert!(!p.cancel_running);
         assert_eq!(p.start, vec![0]);
+    }
+
+    #[test]
+    fn an_outcome_survives_on_disk_and_reads_back() {
+        let dir = std::env::temp_dir().join(format!("lab-agent-done-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let done = Done {
+            status: "ok".into(),
+            exit_code: Some(0),
+            started_at: 10.5,
+            finished_at: 20.25,
+            timeout_secs: 300,
+        };
+        write_done(&dir, "1-job", &done).unwrap();
+        assert_eq!(read_done(&done_path(&dir, "1-job")), Some(done));
+        assert!(
+            !dir.join("1-job.done.tmp").exists(),
+            "the temporary file must be renamed away"
+        );
+    }
+
+    #[test]
+    fn a_torn_marker_reads_as_nothing_not_as_a_result() {
+        let dir = std::env::temp_dir().join(format!("lab-agent-torn-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(done_path(&dir, "2-job"), b"{\"status\":\"o").unwrap();
+        assert_eq!(read_done(&done_path(&dir, "2-job")), None);
     }
 }
