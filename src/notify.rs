@@ -500,8 +500,8 @@ mod tests {
         let lit = |x: usize, y: usize| -> bool {
             match rows[y / 2].get(x).copied().unwrap_or(' ') {
                 '\u{2588}' => true,
-                '\u{2580}' => y % 2 == 0,
-                '\u{2584}' => y % 2 == 1,
+                '\u{2580}' => y.is_multiple_of(2),
+                '\u{2584}' => !y.is_multiple_of(2),
                 _ => false,
             }
         };
