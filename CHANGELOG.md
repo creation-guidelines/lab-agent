@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.11]
+
+
+### Features
+- Phone notifications through ntfy - private channels per user, and jobs that tell you how they ended ([#33](https://github.com/creation-guidelines/lab-agent/pull/33)) ([1c96ede])
+
+
+
 ## [0.1.10]
 
 
