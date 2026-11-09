@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.17]
+
+
+### Bug Fixes
+- The reply box grows and wraps instead of hiding what is typed ([#46](https://github.com/creation-guidelines/lab-agent/pull/46)) ([257ba96])
+
+
+
 ## [0.1.16]
 
 
