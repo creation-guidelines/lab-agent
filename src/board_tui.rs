@@ -60,6 +60,8 @@ struct Scroll {
     hits_from: usize,
     /// The id of the selected task, as last drawn.
     selected_id: Option<String>,
+    /// Where the panes were last drawn, so the mouse can find them.
+    areas: Option<Areas>,
     jobs: usize,
     talk_back: usize,
     /// The project shown: 0 is all, then the board's projects in order.
@@ -229,6 +231,27 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             let key = match event::read()? {
                 Event::Key(key) => key,
                 Event::Mouse(mouse) => {
+                    // the pane under the mouse takes the focus; the wheel scrolls it
+                    let under = scroll
+                        .areas
+                        .and_then(|a| pane_at(&a, mouse.column, mouse.row));
+                    if let Some(pane) = under {
+                        scroll.focus = pane;
+                    }
+                    let wheel: isize = match mouse.kind {
+                        event::MouseEventKind::ScrollUp => -1,
+                        event::MouseEventKind::ScrollDown => 1,
+                        _ => 0,
+                    };
+                    if wheel != 0 && under.is_some() {
+                        let move_by = |v: usize, d: isize| (v as isize + d).max(0) as usize;
+                        match scroll.focus {
+                            Pane::Tasks => scroll.selected = move_by(scroll.selected, wheel),
+                            Pane::Jobs => scroll.jobs = move_by(scroll.jobs, wheel),
+                            Pane::Talk => scroll.talk_back = move_by(scroll.talk_back, -wheel),
+                        }
+                        continue;
+                    }
                     if let event::MouseEventKind::Down(event::MouseButton::Left) = mouse.kind {
                         let hit = scroll
                             .task_hits
@@ -398,7 +421,7 @@ fn shape(area: Rect) -> Shape {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 struct Areas {
     tasks: Rect,
     jobs: Rect,
@@ -407,6 +430,21 @@ struct Areas {
 }
 
 /// `input` is the reply box's height, borders included (it grows with what is typed).
+/// The pane at a point on the screen; the reply box belongs to the conversation.
+fn pane_at(a: &Areas, column: u16, row: u16) -> Option<Pane> {
+    let inside =
+        |r: Rect| column >= r.x && column < r.x + r.width && row >= r.y && row < r.y + r.height;
+    if inside(a.tasks) {
+        Some(Pane::Tasks)
+    } else if inside(a.jobs) {
+        Some(Pane::Jobs)
+    } else if inside(a.talk) || inside(a.input) {
+        Some(Pane::Talk)
+    } else {
+        None
+    }
+}
+
 fn layout(area: Rect, input: u16) -> Areas {
     use Constraint::{Fill, Length, Percentage};
     let split = |dir, area, c: &[Constraint]| {
@@ -601,6 +639,7 @@ fn draw(
         f.area(),
         input_height(wrapped_rows(&format!("{input}▏"), width), f.area().height),
     );
+    scroll.areas = Some(a);
     let at = now();
     let title = match error {
         Some(e) => format!(" control board ({source}) - cannot read: {e} "),
@@ -1037,5 +1076,15 @@ mod tests {
         for (w, h) in [(1, 1), (10, 4), (20, 8), (12, 30)] {
             let _ = screen(w, h, &snap, "typing", &mut Scroll::default());
         }
+    }
+
+    #[test]
+    fn the_pane_under_the_mouse_is_found_and_the_reply_box_belongs_to_the_conversation() {
+        let a = layout(r(200, 50), 3);
+        assert_eq!(pane_at(&a, a.tasks.x + 1, a.tasks.y + 1), Some(Pane::Tasks));
+        assert_eq!(pane_at(&a, a.jobs.x + 1, a.jobs.y + 1), Some(Pane::Jobs));
+        assert_eq!(pane_at(&a, a.talk.x + 1, a.talk.y + 1), Some(Pane::Talk));
+        assert_eq!(pane_at(&a, a.input.x + 1, a.input.y + 1), Some(Pane::Talk));
+        assert_eq!(pane_at(&a, 500, 500), None);
     }
 }
