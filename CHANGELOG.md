@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.29]
+
+
+### Features
+- The board shows which agent runs - and an installed update waiting for idle ([#76](https://github.com/creation-guidelines/lab-agent/pull/76)) ([8e24ed2])
+
+
+
 ## [0.1.28]
 
 
