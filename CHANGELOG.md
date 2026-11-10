@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.44]
+
+
+### Documentation
+- It tells its essence - its idea for anyone and its workings ([#108](https://github.com/creation-guidelines/lab-agent/pull/108)) ([c10adc3])
+
+
+
 ## [0.1.43]
 
 
