@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.41]
+
+
+### CI/CD
+- Ocoeco gathers this repository's activity, releases and CI - data made by work ([#103](https://github.com/creation-guidelines/lab-agent/pull/103)) ([4a188ef])
+
+
+### Features
+- **oco:** Lab-agent's own backlog and path ([#101](https://github.com/creation-guidelines/lab-agent/pull/101)) ([88d62b6])
+
+
+
 ## [0.1.40]
 
 
