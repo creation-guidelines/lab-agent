@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.40]
+
+
+### Features
+- Lab-agent guide - every agent instructs itself from the observatory's living practices ([#99](https://github.com/creation-guidelines/lab-agent/pull/99)) ([c9d2472])
+
+
+
 ## [0.1.39]
 
 
