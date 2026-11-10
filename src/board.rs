@@ -36,6 +36,70 @@ pub struct Board {
     /// Short replies for the machine to send to the info channel, newest last.
     #[serde(default)]
     pub replies: Vec<Reply>,
+    /// Questions the agent is blocked on, answerable from the board.
+    #[serde(default)]
+    pub questions: Vec<Question>,
+    /// What the agent is waiting for, and until when (shown as a countdown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_wait: Option<AgentWait>,
+}
+
+/// A question the agent is blocked on.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Question {
+    pub id: String,
+    pub text: String,
+    pub choices: Vec<String>,
+    pub at: f64,
+}
+
+/// What the agent is waiting for, and until when.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct AgentWait {
+    pub until: f64,
+    pub what: String,
+}
+
+/// The inbox message that answers question `id` with `choice`.
+pub fn answer_text(id: &str, choice: &str) -> String {
+    format!("[answer {id}] {choice}")
+}
+
+/// The answer to question `id` in the inbox, if there is one yet.
+pub fn answer_in(inbox: &Inbox, id: &str) -> Option<String> {
+    let prefix = format!("[answer {id}] ");
+    inbox
+        .messages
+        .iter()
+        .rev()
+        .find_map(|m| m.text.strip_prefix(&prefix).map(|c| c.trim().to_string()))
+}
+
+/// The choice `typed` names: its number (from 1) or its text, case-insensitively.
+pub fn choice_for(q: &Question, typed: &str) -> Option<String> {
+    let typed = typed.trim();
+    typed
+        .parse::<usize>()
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .and_then(|i| q.choices.get(i).cloned())
+        .or_else(|| {
+            q.choices
+                .iter()
+                .find(|c| c.eq_ignore_ascii_case(typed))
+                .cloned()
+        })
+}
+
+/// Changes the board on GitHub and in this machine's copy (so the board here shows it at once).
+pub fn change_board_here(change: impl Fn(&mut Board) -> Result<()>) -> Result<Board> {
+    let (cfg, client) = client()?;
+    let board = update_board(&client, &cfg, change)?;
+    let dir = crate::daemon::state_dir();
+    if dir.is_dir() {
+        let _ = std::fs::write(dir.join(BOARD_PATH), serde_json::to_vec_pretty(&board)?);
+    }
+    Ok(board)
 }
 
 impl Default for Board {
@@ -45,6 +109,8 @@ impl Default for Board {
             tasks: Vec::new(),
             inbox_read_upto: None,
             replies: Vec::new(),
+            questions: Vec::new(),
+            agent_wait: None,
         }
     }
 }
@@ -226,6 +292,16 @@ pub fn apply_in(
                 })?;
         }
         "clear" => board.tasks.clear(),
+        // board waiting SECONDS "what for": a countdown on the board; 0 clears it
+        "waiting" => {
+            let secs: f64 = id.and_then(|s| s.parse().ok()).ok_or_else(|| {
+                anyhow::anyhow!("usage: lab-agent board waiting SECONDS \"what for\"")
+            })?;
+            board.agent_wait = (secs > 0.0).then(|| AgentWait {
+                until: at + secs,
+                what: text.unwrap_or("").to_string(),
+            });
+        }
         _ => bail!("unknown board action {action}"),
     }
     // Finished tasks fade: kept a day, at most the newest fifteen.
@@ -908,5 +984,42 @@ mod tests {
             ),
             ("pc-1", "pc-100")
         );
+    }
+
+    #[test]
+    fn a_wait_counts_down_and_zero_clears_it() {
+        let mut b = Board::default();
+        apply(&mut b, "waiting", Some("150"), Some("your go"), 1000.0).unwrap();
+        assert_eq!(
+            b.agent_wait,
+            Some(AgentWait {
+                until: 1150.0,
+                what: "your go".into()
+            })
+        );
+        apply(&mut b, "waiting", Some("0"), None, 1100.0).unwrap();
+        assert_eq!(b.agent_wait, None);
+    }
+
+    #[test]
+    fn a_question_is_answered_by_number_or_by_text_and_found_in_the_inbox() {
+        let q = Question {
+            id: "q1".into(),
+            text: "Ready?".into(),
+            choices: vec!["Go".into(), "Not yet".into()],
+            at: 0.0,
+        };
+        assert_eq!(choice_for(&q, "2"), Some("Not yet".into()));
+        assert_eq!(choice_for(&q, " go "), Some("Go".into()));
+        assert_eq!(choice_for(&q, "maybe"), None);
+        let inbox = Inbox {
+            messages: vec![Message {
+                id: "m".into(),
+                time: 1,
+                text: answer_text("q1", "Go"),
+            }],
+        };
+        assert_eq!(answer_in(&inbox, "q1"), Some("Go".into()));
+        assert_eq!(answer_in(&inbox, "q2"), None);
     }
 }

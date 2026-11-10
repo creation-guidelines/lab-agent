@@ -188,10 +188,13 @@ So the user can follow a long session, and speak into it, without interrupting i
 - **Desktop popups** only for urgent messages (they need the user): notify-send (KDE, GNOME, XFCE,
   mako, dunst) as critical, a zenity/kdialog window only where no notification service runs (the
   reason is logged). Info, digests and receipts never pop up.
+- **Before any wait, post it**: `lab-agent board waiting SECONDS "what for"` (0 clears) shows a countdown
+  on the board, so the user knows when their next message gets read.
 - **Ask with buttons, then wait**: `lab-agent ask "what will happen, what to check" --choices
   "Go,Not yet" --within 300` shows a popup with buttons, blocks until clicked and prints the button
   (exit 2: no answer). Use it before anything the user must witness: run it as a job and act on
-  its output. The question is in the board's chat and the click lands in the inbox.
+  its output. The question also shows on the board, where the user answers by typing the choice's
+  number or text; whichever answer comes first (popup or board) wins and the other closes.
 - **The board's chat shows everything the agent sent** from the machine (sent.jsonl in the state
   directory; not digests or receipts). `desktop = false`
   in notify.toml turns it off. Send the heads-up (what to expect, what to check) *before* the

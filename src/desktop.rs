@@ -137,43 +137,70 @@ pub fn chosen(printed: &str, choices: &[String]) -> Option<String> {
         .and_then(|i| choices.get(i).cloned())
 }
 
-/// Runs `argv`, waiting at most `within`: its exit code and what it printed, or None on timeout
-/// (it is then stopped) or when it cannot start.
-fn run_for(argv: &[String], within: Duration) -> Option<(i32, String)> {
+/// How a wait ended.
+enum Waited {
+    /// The program exited with this code, having printed this.
+    Exited(i32, String),
+    /// The answer came from elsewhere (the board) first.
+    Elsewhere(String),
+    TimedOut,
+    NotStarted,
+}
+
+/// Runs `argv` until it exits, `elsewhere` yields an answer (the program is then closed), or
+/// `within` passes.
+fn run_until(argv: &[String], within: Duration, elsewhere: &dyn Fn() -> Option<String>) -> Waited {
     use std::io::Read;
-    let mut child = Command::new(&argv[0])
+    let Ok(mut child) = Command::new(&argv[0])
         .args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+    else {
+        return Waited::NotStarted;
+    };
     let deadline = Instant::now() + within;
     loop {
         if let Ok(Some(status)) = child.try_wait() {
             let mut out = String::new();
-            let _ = child.stdout.take()?.read_to_string(&mut out);
-            return Some((status.code().unwrap_or(-1), out));
+            if let Some(mut o) = child.stdout.take() {
+                let _ = o.read_to_string(&mut out);
+            }
+            return Waited::Exited(status.code().unwrap_or(-1), out);
+        }
+        if let Some(a) = elsewhere() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Waited::Elsewhere(a);
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return None;
+            return Waited::TimedOut;
         }
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(300));
     }
 }
 
-/// Asks on the desktop and waits for a click: the notification service's buttons first, a zenity
-/// window where there is none. None: dismissed, or no answer in time.
-pub fn ask(question: &str, choices: &[String], within: Duration) -> Option<String> {
+/// Asks on the desktop and on the board, and takes the first answer: a button of the notification
+/// service (or a zenity window where there is none), or a choice typed on the board. Returns the
+/// answer and whether it came from the board.
+pub fn ask_or(
+    question: &str,
+    choices: &[String],
+    within: Duration,
+    from_board: &dyn Fn() -> Option<String>,
+) -> (Option<String>, bool) {
     let started = Instant::now();
-    match run_for(&ask_argv(question, choices), within) {
-        Some((0, printed)) => return chosen(&printed, choices),
-        None if started.elapsed() >= within => return None, // asked, no click in time
+    match run_until(&ask_argv(question, choices), within, from_board) {
+        Waited::Exited(0, printed) => return (chosen(&printed, choices), false),
+        Waited::Elsewhere(a) => return (Some(a), true),
+        Waited::TimedOut => return (None, false),
         _ => {} // no notification service: a window instead
     }
-    let secs = within.as_secs().max(1).to_string();
+    let left = within.saturating_sub(started.elapsed());
+    let secs = left.as_secs().max(1).to_string();
     let base = |kind: &str| -> Vec<String> {
         [
             "zenity",
@@ -188,24 +215,36 @@ pub fn ask(question: &str, choices: &[String], within: Duration) -> Option<Strin
         .map(String::from)
         .to_vec()
     };
+    let mut argv = base(if choices.len() <= 2 {
+        "--question"
+    } else {
+        "--list"
+    });
     if choices.len() <= 2 {
-        let mut argv = base("--question");
         argv.push(format!("--ok-label={}", choices[0]));
         if let Some(second) = choices.get(1) {
             argv.push(format!("--cancel-label={second}"));
         }
-        return match run_for(&argv, within)?.0 {
-            0 => Some(choices[0].clone()),
-            1 => choices.get(1).cloned(),
-            _ => None,
-        };
+    } else {
+        argv.extend(["--column".to_string(), "choice".to_string()]);
+        argv.extend(choices.iter().cloned());
     }
-    let mut argv = base("--list");
-    argv.extend(["--column".to_string(), "choice".to_string()]);
-    argv.extend(choices.iter().cloned());
-    let (code, printed) = run_for(&argv, within)?;
-    let printed = printed.trim().to_string();
-    (code == 0 && choices.contains(&printed)).then_some(printed)
+    match run_until(&argv, left, from_board) {
+        Waited::Elsewhere(a) => (Some(a), true),
+        Waited::Exited(code, _) if choices.len() <= 2 => (
+            match code {
+                0 => Some(choices[0].clone()),
+                1 => choices.get(1).cloned(),
+                _ => None,
+            },
+            false,
+        ),
+        Waited::Exited(0, printed) => {
+            let printed = printed.trim().to_string();
+            (choices.contains(&printed).then_some(printed), false)
+        }
+        _ => (None, false),
+    }
 }
 
 /// `lab-agent ask QUESTION [--choices A,B] [--within SECONDS]`: prints the button pressed (exit 0),
@@ -230,8 +269,39 @@ pub fn ask_cli(resolved: &argenv_resolve::Resolution) -> anyhow::Result<i32> {
             .unwrap_or(300),
     );
     crate::notify::record_sent(Level::Urgent, "asks", &question);
-    let answer = ask(&question, &choices, within);
-    if let (Some(a), Some(cfg)) = (&answer, crate::notify::load()) {
+    // on the board too, answerable there; whichever answer comes first wins
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs_f64();
+    let q = crate::board::Question {
+        id: format!("q{}", (at * 1000.0) as u64),
+        text: question.clone(),
+        choices: choices.clone(),
+        at,
+    };
+    let qid = q.id.clone();
+    let _ = crate::board::change_board_here(|b| {
+        b.questions.push(q.clone());
+        Ok(())
+    });
+    let inbox_here = crate::daemon::state_dir().join(crate::board::INBOX_PATH);
+    let from_board = || {
+        crate::board::answer_in(
+            &crate::board::parse_inbox(&std::fs::read(&inbox_here).unwrap_or_default()),
+            &qid,
+        )
+    };
+    let (answer, on_board) = ask_or(&question, &choices, within, &from_board);
+    let _ = crate::board::change_board_here(|b| {
+        b.questions.retain(|x| x.id != qid);
+        Ok(())
+    });
+    // an answer typed on the board is in the inbox already; a click is filed there too
+    if on_board && answer.is_some() {
+        println!("(answered on the board)");
+    }
+    if let (Some(a), Some(cfg), false) = (&answer, crate::notify::load(), on_board) {
         let _ = crate::notify::Notifier::new(cfg).send(
             Level::Inbox,
             "you",
