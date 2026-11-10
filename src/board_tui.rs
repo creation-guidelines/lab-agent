@@ -60,6 +60,8 @@ struct Scroll {
     hits_from: usize,
     /// The id of the selected task, as last drawn.
     selected_id: Option<String>,
+    /// Where the quit button was drawn.
+    quit_button: Option<Rect>,
     /// Where the panes were last drawn, so the mouse can find them.
     areas: Option<Areas>,
     jobs: usize,
@@ -231,6 +233,18 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             let key = match event::read()? {
                 Event::Key(key) => key,
                 Event::Mouse(mouse) => {
+                    // the status bar's quit button
+                    if let (event::MouseEventKind::Down(event::MouseButton::Left), Some(q)) =
+                        (mouse.kind, scroll.quit_button)
+                    {
+                        if mouse.column >= q.x
+                            && mouse.column < q.x + q.width
+                            && mouse.row >= q.y
+                            && mouse.row < q.y + q.height
+                        {
+                            return Ok(());
+                        }
+                    }
                     // the pane under the mouse takes the focus; the wheel scrolls it
                     let under = scroll
                         .areas
@@ -365,7 +379,8 @@ fn wrapped_rows(text: &str, width: u16) -> usize {
 }
 
 /// The reply box's height: what is typed (and the cursor) as drawn, plus its borders. It grows
-/// with the message until three lines of the window are left above it.
+/// with the message until three lines of the window are left above it - the conversation keeps at
+/// least those (its newest line, framed), the task and job panes give up their room first.
 fn input_height(text_rows: usize, window: u16) -> u16 {
     let most = window.saturating_sub(3).max(3);
     (text_rows.min(usize::from(u16::MAX)) as u16 + 2).clamp(3, most)
@@ -446,7 +461,7 @@ fn pane_at(a: &Areas, column: u16, row: u16) -> Option<Pane> {
 }
 
 fn layout(area: Rect, input: u16) -> Areas {
-    use Constraint::{Fill, Length, Percentage};
+    use Constraint::{Length, Min, Percentage};
     let split = |dir, area, c: &[Constraint]| {
         Layout::default()
             .direction(dir)
@@ -465,7 +480,7 @@ fn layout(area: Rect, input: u16) -> Areas {
                 cols[0],
                 &[Percentage(50), Percentage(50)],
             );
-            let right = split(Direction::Vertical, cols[1], &[Fill(1), Length(input)]);
+            let right = split(Direction::Vertical, cols[1], &[Min(3), Length(input)]);
             Areas {
                 tasks: left[0],
                 jobs: left[1],
@@ -477,7 +492,7 @@ fn layout(area: Rect, input: u16) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(45), Fill(1), Length(input)],
+                &[Percentage(45), Min(3), Length(input)],
             );
             let top = split(
                 Direction::Horizontal,
@@ -495,7 +510,7 @@ fn layout(area: Rect, input: u16) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(28), Fill(1), Length(input), Percentage(24)],
+                &[Percentage(28), Min(3), Length(input), Percentage(24)],
             );
             Areas {
                 tasks: rows[0],
@@ -634,17 +649,20 @@ fn draw(
     scroll: &mut Scroll,
 ) {
     // the box's width does not depend on its height: measure with one row, then grow it
-    let width = layout(f.area(), 3).input.width;
+    // the status bar takes the last line; the panes share the rest
+    let rows = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(f.area());
+    let (main, bar) = (rows[0], rows[1]);
+    let width = layout(main, 3).input.width;
     let a = layout(
-        f.area(),
-        input_height(wrapped_rows(&format!("{input}▏"), width), f.area().height),
+        main,
+        input_height(wrapped_rows(&format!("{input}▏"), width), main.height),
     );
     scroll.areas = Some(a);
     let at = now();
     let title = match error {
         Some(e) => format!(" control board ({source}) - cannot read: {e} "),
         None => format!(
-            " control board ({source}, times UTC) - {} live tasks - q quits ",
+            " control board ({source}, local time) - {} live tasks ",
             snap.board.live()
         ),
     };
@@ -792,25 +810,7 @@ fn draw(
         .saturating_sub(scroll.talk_back) as u16;
     f.render_widget(
         talk.scroll((top, 0)).block(frame(
-            {
-                // what the agent waits for, counting down
-                let waiting = snap
-                    .board
-                    .agent_wait
-                    .as_ref()
-                    .filter(|w| w.until > at)
-                    .map(|w| {
-                        let left = (w.until - at) as u64;
-                        format!(
-                            "- Claude waits {}:{:02} for {} ",
-                            left / 60,
-                            left % 60,
-                            w.what
-                        )
-                    })
-                    .unwrap_or_default();
-                format!(" conversation (Tab: next pane) {waiting}")
-            },
+            " conversation (Tab: next pane) ".into(),
             scroll.focus == Pane::Talk,
         )),
         a.talk,
@@ -822,6 +822,48 @@ fn draw(
             .block(Block::default().borders(Borders::ALL).title(hint)),
         a.input,
     );
+    // the status bar: what the agent is doing or waiting for, and a quit button
+    let quit = " Quit (Ctrl-C) ";
+    let cols = Layout::horizontal([
+        Constraint::Fill(1),
+        Constraint::Length(quit.chars().count() as u16),
+    ])
+    .split(bar);
+    f.render_widget(
+        Paragraph::new(format!(" \u{25cf} Claude {}", agent_state(&snap.board, at)))
+            .style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+        cols[0],
+    );
+    f.render_widget(
+        Paragraph::new(quit).style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        ),
+        cols[1],
+    );
+    scroll.quit_button = Some(cols[1]);
+}
+
+/// What the agent is doing, for the status bar: its wait with the time left, else the task it
+/// started most recently, else idle.
+fn agent_state(board: &Board, at: f64) -> String {
+    if let Some(w) = board.agent_wait.as_ref().filter(|w| w.until > at) {
+        let left = (w.until - at) as u64;
+        return format!("waits {}:{:02} for {}", left / 60, left % 60, w.what);
+    }
+    board
+        .tasks
+        .iter()
+        .filter(|t| t.state == State::Ongoing)
+        .max_by(|a, b| {
+            a.since
+                .partial_cmp(&b.since)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|t| format!("is working on: {}", t.text))
+        .unwrap_or_else(|| "is idle".to_string())
 }
 
 #[cfg(test)]
@@ -1086,5 +1128,21 @@ mod tests {
         assert_eq!(pane_at(&a, a.talk.x + 1, a.talk.y + 1), Some(Pane::Talk));
         assert_eq!(pane_at(&a, a.input.x + 1, a.input.y + 1), Some(Pane::Talk));
         assert_eq!(pane_at(&a, 500, 500), None);
+    }
+
+    #[test]
+    fn the_status_bar_says_what_the_agent_waits_for_or_works_on() {
+        let mut b = Board::default();
+        assert_eq!(agent_state(&b, 0.0), "is idle");
+        board::apply(&mut b, "set", Some("a"), Some("an old task"), 10.0).unwrap();
+        board::apply(&mut b, "set", Some("b"), Some("the newest task"), 20.0).unwrap();
+        assert_eq!(agent_state(&b, 30.0), "is working on: the newest task");
+        board::apply(&mut b, "waiting", Some("125"), Some("your go"), 30.0).unwrap();
+        assert_eq!(agent_state(&b, 30.0), "waits 2:05 for your go");
+        assert_eq!(
+            agent_state(&b, 200.0),
+            "is working on: the newest task",
+            "a wait that has passed is gone"
+        );
     }
 }
