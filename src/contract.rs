@@ -107,7 +107,7 @@ impl Command {
             }
             Command::Ask => "Ask the user with buttons on the desktop; prints the button pressed",
             Command::SelfUpdate => {
-                "Update lab-agent through pacman; the agent switches to it when no job runs"
+                "Update lab-agent through pacman (--within N: wait up to N s for a newer one); the agent switches to it when no job runs"
             }
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
@@ -241,7 +241,7 @@ contract! {
     WITHIN: u64, Command = Input {
         key:         "within",
         ty:          Type::Uint,
-        subcommands: &[Command::Submit, Command::Wait, Command::Ask],
+        subcommands: &[Command::Submit, Command::Wait, Command::Ask, Command::SelfUpdate],
         arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("within") }),
         summary:     "Stop waiting after this many seconds; the job keeps running",
         ..Input::EMPTY
