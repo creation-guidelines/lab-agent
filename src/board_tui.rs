@@ -62,6 +62,10 @@ struct Scroll {
     selected_id: Option<String>,
     /// Where the quit button was drawn.
     quit_button: Option<Rect>,
+    /// A mouse selection: inside one pane, from where the button went down to where it is.
+    drag: Option<Drag>,
+    /// Each pane's inside and its text as drawn, row by row, so a selection can be read back.
+    drawn: Vec<(Rect, Vec<String>)>,
     /// Where the panes were last drawn, so the mouse can find them.
     areas: Option<Areas>,
     jobs: usize,
@@ -242,6 +246,51 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     continue;
                 }
                 Event::Mouse(mouse) => {
+                    // selecting text: press in a pane, drag inside it, release to copy
+                    let at = (mouse.column, mouse.row);
+                    match mouse.kind {
+                        event::MouseEventKind::Down(event::MouseButton::Left) => {
+                            scroll.drag = scroll
+                                .drawn
+                                .iter()
+                                .map(|(r, _)| *r)
+                                .find(|r| {
+                                    at.0 >= r.x
+                                        && at.0 < r.x + r.width
+                                        && at.1 >= r.y
+                                        && at.1 < r.y + r.height
+                                })
+                                .map(|area| Drag {
+                                    area,
+                                    from: at,
+                                    to: at,
+                                });
+                        }
+                        event::MouseEventKind::Drag(event::MouseButton::Left) => {
+                            if let Some(d) = scroll.drag.as_mut() {
+                                d.to = (
+                                    at.0.clamp(d.area.x, d.area.x + d.area.width.saturating_sub(1)),
+                                    at.1.clamp(
+                                        d.area.y,
+                                        d.area.y + d.area.height.saturating_sub(1),
+                                    ),
+                                );
+                            }
+                            continue;
+                        }
+                        event::MouseEventKind::Up(event::MouseButton::Left) => {
+                            if let Some(d) = scroll.drag.filter(|d| d.from != d.to) {
+                                if let Some((_, rows)) =
+                                    scroll.drawn.iter().find(|(r, _)| *r == d.area)
+                                {
+                                    copy_to_clipboard(&selection_text(rows, &d));
+                                }
+                            } else {
+                                scroll.drag = None;
+                            }
+                        }
+                        _ => {}
+                    }
                     // the status bar's quit button
                     if let (event::MouseEventKind::Down(event::MouseButton::Left), Some(q)) =
                         (mouse.kind, scroll.quit_button)
@@ -443,6 +492,93 @@ fn shape(area: Rect) -> Shape {
         Shape::Tall
     } else {
         Shape::Square
+    }
+}
+
+/// A mouse selection, in screen cells, kept inside one pane's inside.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Drag {
+    area: Rect,
+    from: (u16, u16),
+    to: (u16, u16),
+}
+
+/// Whether the cell (x, y) is selected: in reading order from `from` to `to`, row after row, as
+/// text wraps inside the pane - never across into another pane.
+fn selected(d: &Drag, x: u16, y: u16) -> bool {
+    let (a, b) = if (d.from.1, d.from.0) <= (d.to.1, d.to.0) {
+        (d.from, d.to)
+    } else {
+        (d.to, d.from)
+    };
+    let inside = x >= d.area.x && x < d.area.x + d.area.width && y >= a.1 && y <= b.1;
+    inside && (y > a.1 || x >= a.0) && (y < b.1 || x <= b.0)
+}
+
+/// The selected text, from a pane's rows as drawn: each row's selected part, trailing spaces gone.
+fn selection_text(rows: &[String], d: &Drag) -> String {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(i, row)| {
+            let y = d.area.y + i as u16;
+            let chars: Vec<char> = row.chars().collect();
+            let picked: String = (0..d.area.width)
+                .filter(|&dx| selected(d, d.area.x + dx, y))
+                .filter_map(|dx| chars.get(usize::from(dx)))
+                .collect();
+            (!picked.is_empty()).then(|| picked.trim_end().to_string())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Standard base64, for the terminal's clipboard sequence.
+fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (u32::from(c[0]) << 16)
+            | (u32::from(*c.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*c.get(2).unwrap_or(&0));
+        for (i, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            out.push(if i <= c.len() {
+                char::from(T[((n >> shift) & 63) as usize])
+            } else {
+                '='
+            });
+        }
+    }
+    out
+}
+
+/// Puts text on the clipboard: the terminal's own sequence (OSC 52), and wl-copy under Wayland.
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    let mut out = std::io::stdout();
+    let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
+    let _ = out.flush();
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+        }
+    }
+}
+
+/// A pane's inside: its border taken off.
+fn inside(r: Rect) -> Rect {
+    Rect {
+        x: r.x + 1,
+        y: r.y + 1,
+        width: r.width.saturating_sub(2),
+        height: r.height.saturating_sub(2),
     }
 }
 
@@ -832,6 +968,31 @@ fn draw(
             .block(Block::default().borders(Borders::ALL).title(hint)),
         a.input,
     );
+    // each pane's text as drawn, for mouse selections; then the selection, reversed
+    let buf = f.buffer_mut();
+    scroll.drawn = [a.tasks, a.jobs, a.talk, a.input]
+        .into_iter()
+        .map(inside)
+        .map(|i| {
+            let rows = (i.y..i.y + i.height)
+                .map(|y| {
+                    (i.x..i.x + i.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                })
+                .collect();
+            (i, rows)
+        })
+        .collect();
+    if let Some(d) = scroll.drag {
+        for y in d.area.y..d.area.y + d.area.height {
+            for x in d.area.x..d.area.x + d.area.width {
+                if selected(&d, x, y) {
+                    buf[(x, y)].set_style(Style::default().add_modifier(Modifier::REVERSED));
+                }
+            }
+        }
+    }
     // the status bar: what the agent is doing or waiting for, and a quit button
     let quit = " Quit (Ctrl-C) ";
     let version = agent_label(snap.agent.as_deref(), env!("CARGO_PKG_VERSION"));
@@ -1213,5 +1374,59 @@ mod tests {
         board::apply(&mut b, "set", Some("new"), Some("started later"), 20.0).unwrap();
         board::apply(&mut b, "set", Some("old"), Some("updated just now"), 30.0).unwrap();
         assert_eq!(agent_state(&b, 31.0), "is working on: updated just now");
+    }
+
+    #[test]
+    fn a_selection_flows_row_by_row_inside_its_pane() {
+        let d = Drag {
+            area: Rect {
+                x: 10,
+                y: 5,
+                width: 6,
+                height: 3,
+            },
+            from: (13, 5),
+            to: (11, 7),
+        };
+        assert!(
+            !selected(&d, 12, 5) && selected(&d, 13, 5) && selected(&d, 15, 5),
+            "first row: from the anchor on"
+        );
+        assert!(
+            selected(&d, 10, 6) && selected(&d, 15, 6),
+            "a middle row: all of it"
+        );
+        assert!(
+            selected(&d, 11, 7) && !selected(&d, 12, 7),
+            "last row: up to the end"
+        );
+        assert!(!selected(&d, 16, 6), "never past the pane's edge");
+    }
+
+    #[test]
+    fn the_selected_text_is_read_back_as_drawn() {
+        let d = Drag {
+            area: Rect {
+                x: 0,
+                y: 0,
+                width: 6,
+                height: 3,
+            },
+            from: (2, 0),
+            to: (1, 2),
+        };
+        let rows = vec![
+            "hello ".to_string(),
+            "wide  ".to_string(),
+            "world ".to_string(),
+        ];
+        assert_eq!(selection_text(&rows, &d), "llo\nwide\nwo");
+    }
+
+    #[test]
+    fn base64_for_the_clipboard() {
+        assert_eq!(base64(b"hello"), "aGVsbG8=");
+        assert_eq!(base64(b"hi"), "aGk=");
+        assert_eq!(base64(b""), "");
     }
 }
