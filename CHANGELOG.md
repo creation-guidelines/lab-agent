@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.43]
+
+
+### Miscellaneous
+- **oco:** Backlog - a lock per clone, so two jobs cannot work in one at once ([#106](https://github.com/creation-guidelines/lab-agent/pull/106)) ([264bb17])
+
+
+
 ## [0.1.42]
 
 
