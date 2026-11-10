@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.28]
+
+
+### Features
+- Updates apply themselves when the agent is idle ([#74](https://github.com/creation-guidelines/lab-agent/pull/74)) ([c8142eb])
+
+
+
 ## [0.1.27]
 
 
