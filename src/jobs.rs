@@ -291,10 +291,39 @@ pub fn is_stale(row: &JobRow, now: f64) -> bool {
 
 /// A plain HH:MM:SS in UTC. No chrono/time dependency needed for something this simple; shared
 /// by the `jobs` subcommand and the `monitor` TUI so both show times the same way.
+/// A time of day on this machine's clock (its timezone, as the system reports it now).
 pub fn format_time(unix: f64) -> String {
-    let secs = unix as i64;
-    let (h, m, s) = ((secs / 3600) % 24, (secs / 60) % 60, secs % 60);
+    clock(unix, local_offset())
+}
+
+/// The time of day `offset` seconds east of UTC.
+pub fn clock(unix: f64, offset: i64) -> String {
+    let secs = (unix as i64 + offset).rem_euclid(86_400);
+    let (h, m, s) = (secs / 3600, (secs / 60) % 60, secs % 60);
     format!("{h:02}:{m:02}:{s:02}")
+}
+
+/// This machine's offset from UTC in seconds, asked of the system once.
+// tm_gmtoff is a C long: i64 on 64-bit targets (where clippy calls the conversion useless), i32 on
+// 32-bit ones (where it is needed). The conversion stays, so the code builds right on both.
+#[allow(clippy::useless_conversion)]
+fn local_offset() -> i64 {
+    static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as libc::time_t)
+            .unwrap_or(0);
+        // SAFETY: localtime_r only writes the tm it is given; both live for the whole call.
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::localtime_r(&now, &mut tm).is_null() {
+                0
+            } else {
+                i64::from(tm.tm_gmtoff)
+            }
+        }
+    })
 }
 
 pub fn format_duration(secs: f64) -> String {
@@ -460,5 +489,20 @@ mod tests {
         assert_eq!(second.len(), 2);
         assert_eq!(second[0].status, "ok");
         assert_eq!(second[0].timeout_secs, Some(60));
+    }
+
+    #[test]
+    fn the_clock_shows_the_time_of_day_in_the_given_offset() {
+        assert_eq!(clock(0.0, 0), "00:00:00");
+        assert_eq!(
+            clock(3600.0 * 25.0 + 61.0, 3600),
+            "02:01:01",
+            "an hour east of UTC"
+        );
+        assert_eq!(
+            clock(1800.0, -3600),
+            "23:30:00",
+            "west of UTC, the day before"
+        );
     }
 }
