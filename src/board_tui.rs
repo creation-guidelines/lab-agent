@@ -116,6 +116,8 @@ struct Snapshot {
     jobs: Vec<JobRow>,
     /// this machine's log of what the agent sent (none when read from elsewhere)
     sent: Option<Vec<crate::notify::Sent>>,
+    /// the version of the agent running on this machine (none when read from elsewhere)
+    agent: Option<String>,
 }
 
 fn now() -> f64 {
@@ -178,6 +180,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 inbox: board::parse_inbox(&read(board::INBOX_PATH)),
                 jobs: jobs::local_rows(&dir, 20),
                 sent: Some(crate::notify::read_sent(&dir.join(crate::notify::SENT_LOG))),
+                agent: running_agent(&dir),
             };
             if tx.send(Ok(snap)).is_err() {
                 return;
@@ -824,11 +827,17 @@ fn draw(
     );
     // the status bar: what the agent is doing or waiting for, and a quit button
     let quit = " Quit (Ctrl-C) ";
+    let version = agent_label(snap.agent.as_deref(), env!("CARGO_PKG_VERSION"));
     let cols = Layout::horizontal([
         Constraint::Fill(1),
+        Constraint::Length(version.chars().count() as u16),
         Constraint::Length(quit.chars().count() as u16),
     ])
     .split(bar);
+    f.render_widget(
+        Paragraph::new(version).style(Style::default().fg(Color::White).bg(Color::DarkGray)),
+        cols[1],
+    );
     f.render_widget(
         Paragraph::new(format!(" \u{25cf} Claude {}", agent_state(&snap.board, at)))
             .style(Style::default().fg(Color::Black).bg(Color::Cyan)),
@@ -841,9 +850,25 @@ fn draw(
                 .bg(Color::Red)
                 .add_modifier(Modifier::BOLD),
         ),
-        cols[1],
+        cols[2],
     );
-    scroll.quit_button = Some(cols[1]);
+    scroll.quit_button = Some(cols[2]);
+}
+
+/// The version of the agent running on this machine, from the file it writes when it starts.
+fn running_agent(state_dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(state_dir.join(crate::daemon::AGENT_FILE)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v["version"].as_str().map(str::to_string)
+}
+
+/// Which agent runs, for the status bar - and the newer one installed, while it waits for idle.
+fn agent_label(running: Option<&str>, installed: &str) -> String {
+    match running {
+        Some(v) if v != installed => format!(" agent {v} \u{2192} {installed} when idle "),
+        Some(v) => format!(" agent {v} "),
+        None => String::new(),
+    }
 }
 
 /// What the agent is doing, for the status bar: its wait with the time left, else the task it
@@ -1080,6 +1105,7 @@ mod tests {
             inbox: Inbox { messages },
             jobs: vec![],
             sent: None,
+            agent: None,
         }
     }
 
@@ -1143,6 +1169,20 @@ mod tests {
             agent_state(&b, 200.0),
             "is working on: the newest task",
             "a wait that has passed is gone"
+        );
+    }
+
+    #[test]
+    fn the_status_bar_shows_which_agent_runs_and_a_waiting_update() {
+        assert_eq!(agent_label(Some("0.1.29"), "0.1.29"), " agent 0.1.29 ");
+        assert_eq!(
+            agent_label(Some("0.1.28"), "0.1.29"),
+            " agent 0.1.28 \u{2192} 0.1.29 when idle "
+        );
+        assert_eq!(
+            agent_label(None, "0.1.29"),
+            "",
+            "no agent on this machine: nothing shown"
         );
     }
 }
