@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.27]
+
+
+### Bug Fixes
+- Tests never write to the machine's sent log ([#72](https://github.com/creation-guidelines/lab-agent/pull/72)) ([f8ecc34])
+
+
+
 ## [0.1.26]
 
 
