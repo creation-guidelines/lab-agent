@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.35]
+
+
+### Bug Fixes
+- Self-update --within retries a failed sync ([#89](https://github.com/creation-guidelines/lab-agent/pull/89)) ([7bbac87])
+
+
+
 ## [0.1.34]
 
 
