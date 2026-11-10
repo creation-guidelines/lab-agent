@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.34]
+
+
+### Features
+- Board remove ID - a task dropped, not done, leaves the board ([#87](https://github.com/creation-guidelines/lab-agent/pull/87)) ([9f48823])
+
+
+
 ## [0.1.33]
 
 
