@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.30]
+
+
+### Features
+- Self-update --within SECONDS waits for a newer lab-agent ([#78](https://github.com/creation-guidelines/lab-agent/pull/78)) ([ba358c1])
+
+
+
 ## [0.1.29]
 
 
