@@ -86,7 +86,7 @@ fn run() -> Result<()> {
         Command::NotifySetup => notify::setup(),
         Command::Board => board::board_cli(&resolved),
         Command::Inbox => board::inbox_cli(&resolved),
-        Command::SelfUpdate => self_update::run(),
+        Command::SelfUpdate => self_update::run(&resolved),
         Command::Completions => completions::completions(&resolved),
         Command::Man => completions::man(),
         Command::RootExec => unreachable!("handled above"),
