@@ -181,7 +181,10 @@ So the user can follow a long session, and speak into it, without interrupting i
 - **The control board** (`lab-agent board` in a terminal) is one live view of the whole system: tasks
   by state, the jobs, the conversation (the user's messages, read ticks, the agent's replies) and a
   reply box (Enter sends to the inbox). Its layout follows the window: side by side when wide,
-  a 2x2 grid when square (tiling), stacked when tall (a phone).
+  a 2x2 grid when square (tiling), stacked when tall (a phone). Wrapped text is measured with the
+  same word wrap that draws it (ratatui's line_count), never by counting characters. The reply box
+  grows until three lines of the window are left; a task shows one line, and the selected one (arrows
+  in the tasks pane, or a click) opens in full with Enter or a click.
 - **Desktop popups** only for urgent messages (they need the user): notify-send (KDE, GNOME, XFCE,
   mako, dunst) as critical, a zenity/kdialog window only where no notification service runs (the
   reason is logged). Info, digests and receipts never pop up.
