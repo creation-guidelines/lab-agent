@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.38]
+
+
+### Features
+- The reply box edits like a text field ([#95](https://github.com/creation-guidelines/lab-agent/pull/95)) ([bcbafc5])
+
+
+
 ## [0.1.37]
 
 
