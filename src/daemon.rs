@@ -200,6 +200,10 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
         std::thread::spawn(move || watch_board_and_inbox(&shared, &state_dir));
     }
 
+    // The program as it was when this agent started: when an update installs a new one at the same
+    // path (a different file), the agent switches to it as soon as nothing runs.
+    let exe = std::env::current_exe().ok();
+    let exe_id = exe.as_deref().and_then(file_id);
     let mut state = PollState::default();
     loop {
         flush_unsent(&shared, &state_dir);
@@ -218,7 +222,35 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
             },
         };
         std::thread::sleep(pause);
+        let idle = lock(&shared.running).is_empty() && lock(&shared.in_flight).is_empty();
+        if let Some(exe) = exe
+            .as_deref()
+            .filter(|p| idle && replaced(exe_id, file_id(p)))
+        {
+            println!(
+                "lab-agent: a newer lab-agent is installed and nothing runs - switching to it"
+            );
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new(exe)
+                .args(std::env::args_os().skip(1))
+                .exec();
+            eprintln!(
+                "lab-agent: could not start the new version ({err}); carrying on with this one"
+            );
+        }
     }
+}
+
+/// A file's identity: device and inode. An install writes a new file, so the identity changes even
+/// when the timestamp does not (pacman keeps the package's build time).
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+}
+
+/// Whether the program at the agent's path is no longer the one it started from.
+fn replaced(started: Option<(u64, u64)>, now: Option<(u64, u64)>) -> bool {
+    matches!((started, now), (Some(a), Some(b)) if a != b)
 }
 
 /// Every job that already has a result. Any that says `running` was cut off by a restart.
@@ -1057,6 +1089,20 @@ mod tests {
         assert_eq!(
             partial_log_every(Duration::from_secs(3600)),
             Duration::from_secs(60)
+        );
+    }
+
+    #[test]
+    fn the_agent_switches_only_to_a_different_file_at_its_path() {
+        assert!(replaced(Some((1, 10)), Some((1, 11))), "a new install");
+        assert!(!replaced(Some((1, 10)), Some((1, 10))), "the same program");
+        assert!(
+            !replaced(Some((1, 10)), None),
+            "nothing there (mid-install): wait"
+        );
+        assert!(
+            !replaced(None, Some((1, 11))),
+            "unknown at start: never switch blindly"
         );
     }
 }

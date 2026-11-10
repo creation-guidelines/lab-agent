@@ -106,7 +106,9 @@ impl Command {
                 "Your messages from the ntfy inbox channel: inbox [--ack] [--reply TEXT]"
             }
             Command::Ask => "Ask the user with buttons on the desktop; prints the button pressed",
-            Command::SelfUpdate => "Update lab-agent through pacman and restart the service",
+            Command::SelfUpdate => {
+                "Update lab-agent through pacman; the agent switches to it when no job runs"
+            }
             Command::RootExec => "Run a command as root: root-exec -- COMMAND [ARGS...]",
             Command::Completions => "Print shell completions (bash, zsh, fish, nushell)",
             Command::Man => "Print the man page",
