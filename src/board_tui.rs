@@ -649,9 +649,9 @@ fn draw(
     scroll: &mut Scroll,
 ) {
     // the box's width does not depend on its height: measure with one row, then grow it
-    // the status bar takes the last line; the panes share the rest
-    let rows = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).split(f.area());
-    let (main, bar) = (rows[0], rows[1]);
+    // the status bar takes the first line; the panes share the rest
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).split(f.area());
+    let (bar, main) = (rows[0], rows[1]);
     let width = layout(main, 3).input.width;
     let a = layout(
         main,
