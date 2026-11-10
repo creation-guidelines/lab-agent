@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.39]
+
+
+### Miscellaneous
+- The observatory's mark (oco.toml) ([#97](https://github.com/creation-guidelines/lab-agent/pull/97)) ([d7ae942])
+
+
+
 ## [0.1.38]
 
 
