@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.36]
+
+
+### Features
+- Select text with the mouse in the board - inside a pane, copied on release ([#91](https://github.com/creation-guidelines/lab-agent/pull/91)) ([40c9cf2])
+
+
+
 ## [0.1.35]
 
 
