@@ -1,6 +1,15 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.23]
+
+
+### Features
+- The board measures text as it draws it; tasks open in full; the reply box grows freely ([#61](https://github.com/creation-guidelines/lab-agent/pull/61)) ([2b25514])
+- Questions answerable on the board, and the agent's waits as a countdown ([#63](https://github.com/creation-guidelines/lab-agent/pull/63)) ([4ebec97])
+
+
+
 ## [0.1.22]
 
 
