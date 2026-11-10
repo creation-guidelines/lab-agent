@@ -193,10 +193,12 @@ pub fn run(resolved: &Resolution) -> Result<()> {
     let (mut pending, mut next_id) = (Vec::<Pending>::new(), 0u64);
     let mut scroll = Scroll::default();
     let mut terminal = ratatui::try_init()?;
-    // clicks select and expand tasks (shift-drag still selects text in most terminals)
+    // clicks select and expand tasks (shift-drag still selects text in most terminals); a paste
+    // arrives as one block, so its newlines do not send it in pieces
     ratatui::crossterm::execute!(
         std::io::stdout(),
-        ratatui::crossterm::event::EnableMouseCapture
+        ratatui::crossterm::event::EnableMouseCapture,
+        ratatui::crossterm::event::EnableBracketedPaste
     )?;
     let (mut snap, mut error, mut input) = (Snapshot::default(), None::<String>, String::new());
     let result = (|| -> Result<()> {
@@ -235,6 +237,10 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             }
             let key = match event::read()? {
                 Event::Key(key) => key,
+                Event::Paste(text) => {
+                    input.push_str(&pasted(&text));
+                    continue;
+                }
                 Event::Mouse(mouse) => {
                     // the status bar's quit button
                     if let (event::MouseEventKind::Down(event::MouseButton::Left), Some(q)) =
@@ -367,7 +373,8 @@ pub fn run(resolved: &Resolution) -> Result<()> {
     })();
     let _ = ratatui::crossterm::execute!(
         std::io::stdout(),
-        ratatui::crossterm::event::DisableMouseCapture
+        ratatui::crossterm::event::DisableMouseCapture,
+        ratatui::crossterm::event::DisableBracketedPaste
     );
     ratatui::restore();
     result
@@ -855,6 +862,11 @@ fn draw(
     scroll.quit_button = Some(cols[2]);
 }
 
+/// Pasted text for the reply box: whole, its line ends made plain newlines.
+fn pasted(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
 /// The version of the agent running on this machine, from the file it writes when it starts.
 fn running_agent(state_dir: &std::path::Path) -> Option<String> {
     let text = std::fs::read_to_string(state_dir.join(crate::daemon::AGENT_FILE)).ok()?;
@@ -1184,5 +1196,11 @@ mod tests {
             "",
             "no agent on this machine: nothing shown"
         );
+    }
+
+    #[test]
+    fn a_paste_keeps_its_lines_and_plain_newlines() {
+        assert_eq!(pasted("one\r\ntwo\rthree\nfour"), "one\ntwo\nthree\nfour");
+        assert_eq!(pasted("no newline"), "no newline");
     }
 }
