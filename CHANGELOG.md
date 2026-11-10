@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.33]
+
+
+### Bug Fixes
+- Digests only when the board changed, and no retry storm on a failed send ([#85](https://github.com/creation-guidelines/lab-agent/pull/85)) ([135c6af])
+
+
+
 ## [0.1.32]
 
 
