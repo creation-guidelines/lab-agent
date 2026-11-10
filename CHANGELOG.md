@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.26]
+
+
+### Documentation
+- How work is done here - the lab machine, land, reading messages before acknowledging ([#69](https://github.com/creation-guidelines/lab-agent/pull/69)) ([de0ef26])
+
+
+### Features
+- The status bar at the top of the board ([#71](https://github.com/creation-guidelines/lab-agent/pull/71)) ([de6dbbb])
+
+
+
 ## [0.1.25]
 
 
