@@ -9,6 +9,7 @@ mod daemon;
 mod desktop;
 mod editor;
 mod github;
+mod guide;
 mod job;
 mod jobs;
 mod monitor;
@@ -88,6 +89,7 @@ fn run() -> Result<()> {
         Command::Board => board::board_cli(&resolved),
         Command::Inbox => board::inbox_cli(&resolved),
         Command::SelfUpdate => self_update::run(&resolved),
+        Command::Guide => guide::run(),
         Command::Completions => completions::completions(&resolved),
         Command::Man => completions::man(),
         Command::RootExec => unreachable!("handled above"),
