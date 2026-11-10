@@ -14,6 +14,10 @@ Instructions for an AI agent working in this repository.
   the PR from the commit, waits for every check, refuses on a failing one, squash-merges and updates
   main. A job's checks must stop it before it pushes - never pipe a check's output through a filter
   that hides its exit status.
+- **Lists go to commands as arguments** (`git ls-files -z | xargs -0 cmd`), never spliced into a
+  shell string such as `nix-shell --run "cmd $files"`: the newlines turn every name after the first
+  into a command, and the scripts run. It happened once; nothing was damaged only because every
+  state-changing script refuses to run without arguments.
 - **Reading the user's messages**: print every unread message before acknowledging any
   (`lab-agent inbox`, then `inbox --ack`) - acknowledging blind once hid a message.
 
