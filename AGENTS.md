@@ -2,6 +2,18 @@
 
 Instructions for an AI agent working in this repository.
 
+## How work is done here
+
+- **On the lab machine, never in an agent's own sandbox**: edits, builds and tests run there through
+  lab-agent jobs, in this clone (`~/Projects/creation-guidelines/lab-agent`) and the pinned shell
+  (`nix-shell shell.nix`; `NIX_PATH` is pinned for jobs by lab-machine's `setup/nix-path.sh`).
+- **Landing a branch**: `land` (lab-machine's `bin/land`, linked into `~/.local/bin`) opens or reuses
+  the PR from the commit, waits for every check, refuses on a failing one, squash-merges and updates
+  main. A job's checks must stop it before it pushes - never pipe a check's output through a filter
+  that hides its exit status.
+- **Reading the user's messages**: print every unread message before acknowledging any
+  (`lab-agent inbox`, then `inbox --ack`) - acknowledging blind once hid a message.
+
 ## What this is
 
 `lab-agent` is a pull-based job runner for hardware-in-the-loop work. It polls a jobs repo
