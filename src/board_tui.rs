@@ -939,4 +939,103 @@ mod tests {
             "past the end stays on the last"
         );
     }
+
+    /// What a person sees at a window size: the screen drawn into memory, as text.
+    fn screen(w: u16, h: u16, snap: &Snapshot, input: &str, scroll: &mut Scroll) -> String {
+        let mut term = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, snap, None, "test", input, &[], scroll))
+            .unwrap();
+        let buf = term.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..h {
+            for x in 0..w {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    fn busy_board() -> Snapshot {
+        let long =
+            "a long task description that will not fit on one line of a narrow window at all";
+        let tasks = (0..12)
+            .map(|i| board::Task {
+                id: format!("t{i}"),
+                text: format!("{long} {i}"),
+                since: 0.0,
+                state: State::Ongoing,
+                done_at: None,
+                project: Some(
+                    if i % 2 == 0 {
+                        "surya-audio"
+                    } else {
+                        "lab-agent"
+                    }
+                    .into(),
+                ),
+            })
+            .collect();
+        let messages = (0..30)
+            .map(|i| board::Message {
+                id: format!("m{i}"),
+                time: i,
+                text: format!(
+                    "message {i}: {}",
+                    "words that wrap around the edge ".repeat(i as usize % 5 + 1)
+                ),
+            })
+            .chain(std::iter::once(board::Message {
+                id: "last".into(),
+                time: 99,
+                text: "the newest one ends with ZQZ".into(),
+            }))
+            .collect();
+        Snapshot {
+            board: Board {
+                tasks,
+                ..Default::default()
+            },
+            inbox: Inbox { messages },
+            jobs: vec![],
+            sent: None,
+        }
+    }
+
+    #[test]
+    fn at_every_window_size_the_newest_message_and_the_reply_box_stay_in_view() {
+        let snap = busy_board();
+        let typed = "a reply being typed that is long enough to wrap over several lines in a narrow box QXQ";
+        let mut scroll = Scroll::default();
+        // one session resized through all of these, as a tiling window manager would
+        for (w, h) in [
+            (250, 80),
+            (200, 50),
+            (100, 50),
+            (80, 24),
+            (48, 90),
+            (40, 30),
+            (30, 16),
+            (100, 50),
+            (60, 20),
+        ] {
+            let shown = screen(w, h, &snap, typed, &mut scroll);
+            assert!(
+                shown.contains("ZQZ"),
+                "newest message hidden at {w}x{h}:\n{shown}"
+            );
+            assert!(
+                shown.contains("QXQ"),
+                "the end of the reply hidden at {w}x{h}:\n{shown}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_window_too_small_for_everything_still_draws() {
+        let snap = busy_board();
+        for (w, h) in [(1, 1), (10, 4), (20, 8), (12, 30)] {
+            let _ = screen(w, h, &snap, "typing", &mut Scroll::default());
+        }
+    }
 }

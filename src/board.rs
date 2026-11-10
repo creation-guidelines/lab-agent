@@ -533,13 +533,26 @@ pub fn board_cli(resolved: &Resolution) -> Result<()> {
             "live tasks go to the info channel every {} min",
             board.every_minutes
         );
+        // the id column as wide as the longest id, so every row lines up
+        let id_width = board
+            .tasks
+            .iter()
+            .map(|t| t.id.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max(4);
         for t in board.ordered() {
             let project = t
                 .project
                 .as_deref()
                 .map(|p| format!("[{p}] "))
                 .unwrap_or_default();
-            println!("  {:<16} {:<10} {project}{}", t.state.word(), t.id, t.text);
+            println!(
+                "  {:<16} {:<id_width$} {project}{}",
+                t.state.word(),
+                t.id,
+                t.text
+            );
         }
         if board.tasks.is_empty() {
             println!("  (empty)");
