@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.42]
+
+
+### Miscellaneous
+- Gathered data lives on the oco-data branch - main is the history of the work ([#104](https://github.com/creation-guidelines/lab-agent/pull/104)) ([ec7d551])
+
+
+### Data
+- Gathered by ocoeco ([b8b377b])
+
+
+
 ## [0.1.41]
 
 
