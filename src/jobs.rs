@@ -304,6 +304,9 @@ pub fn clock(unix: f64, offset: i64) -> String {
 }
 
 /// This machine's offset from UTC in seconds, asked of the system once.
+// tm_gmtoff is a C long: i64 on 64-bit targets (where clippy calls the conversion useless), i32 on
+// 32-bit ones (where it is needed). The conversion stays, so the code builds right on both.
+#[allow(clippy::useless_conversion)]
 fn local_offset() -> i64 {
     static OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
     *OFFSET.get_or_init(|| {
