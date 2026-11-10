@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.24]
+
+
+### Features
+- The pane under the mouse takes the focus; the wheel scrolls it ([#66](https://github.com/creation-guidelines/lab-agent/pull/66)) ([2f4055c])
+
+
+### Testing
+- The board keeps the newest message and the reply in view at every window size ([#64](https://github.com/creation-guidelines/lab-agent/pull/64)) ([35b5258])
+
+
+
 ## [0.1.23]
 
 
