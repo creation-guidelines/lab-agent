@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.37]
+
+
+### Features
+- The status bar shows the agent's state at a glance; waits on jobs show themselves ([#93](https://github.com/creation-guidelines/lab-agent/pull/93)) ([ecbd2f1])
+
+
+
 ## [0.1.36]
 
 
