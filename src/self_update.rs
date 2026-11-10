@@ -31,8 +31,11 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 "--noconfirm",
             ])
             .status()?;
-        anyhow::ensure!(sync.success(), "pacman -Sy failed");
-        if within.is_none()
+        if !sync.success() {
+            // while waiting, a failed sync (a mirror's hiccup) is one more "not yet"
+            anyhow::ensure!(within.is_some(), "pacman -Sy failed");
+            println!("lab-agent self-update: the sync failed - trying again in 30 s");
+        } else if within.is_none()
             || offers_another(
                 &pacman(&["-Q", "lab-agent"]),
                 &pacman(&["-Si", "lab-agent"]),
