@@ -60,6 +60,8 @@ struct Scroll {
     hits_from: usize,
     /// The id of the selected task, as last drawn.
     selected_id: Option<String>,
+    /// The reply box's selection, in its displayed text.
+    input_sel: Option<(usize, usize)>,
     /// Where the quit button was drawn.
     quit_button: Option<Rect>,
     /// A mouse selection: inside one pane, from where the button went down to where it is.
@@ -204,7 +206,11 @@ pub fn run(resolved: &Resolution) -> Result<()> {
         ratatui::crossterm::event::EnableMouseCapture,
         ratatui::crossterm::event::EnableBracketedPaste
     )?;
-    let (mut snap, mut error, mut input) = (Snapshot::default(), None::<String>, String::new());
+    let (mut snap, mut error, mut input) = (
+        Snapshot::default(),
+        None::<String>,
+        crate::editor::Editor::default(),
+    );
     let result = (|| -> Result<()> {
         loop {
             while let Ok(got) = rx.try_recv() {
@@ -225,13 +231,16 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 }
             }
             settle(&mut pending, &snap.inbox);
+            {
+                scroll.input_sel = input.selection_in_display();
+            }
             terminal.draw(|f| {
                 draw(
                     f,
                     &snap,
                     error.as_deref(),
                     source,
-                    &input,
+                    &input.display(),
                     &pending,
                     &mut scroll,
                 )
@@ -242,7 +251,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             let key = match event::read()? {
                 Event::Key(key) => key,
                 Event::Paste(text) => {
-                    input.push_str(&pasted(&text));
+                    input.insert_str(&pasted(&text));
                     continue;
                 }
                 Event::Mouse(mouse) => {
@@ -348,9 +357,35 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                 continue;
             }
             match key.code {
+                // Ctrl+C copies a selection in the reply box; with none, it quits
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    return Ok(())
+                    match input.selected() {
+                        Some(s) => copy_to_clipboard(&s),
+                        None => return Ok(()),
+                    }
                 }
+                KeyCode::Char('x') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    if let Some(s) = input.cut() {
+                        copy_to_clipboard(&s);
+                    }
+                }
+                KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    input.select_all()
+                }
+                // with text in the reply box, the arrows, Home and End edit it; without, they move
+                KeyCode::Left | KeyCode::Right | KeyCode::Home | KeyCode::End
+                    if !input.is_empty() =>
+                {
+                    let word = key.modifiers.contains(KeyModifiers::CONTROL);
+                    let extend = key.modifiers.contains(KeyModifiers::SHIFT);
+                    match key.code {
+                        KeyCode::Left => input.left(word, extend),
+                        KeyCode::Right => input.right(word, extend),
+                        KeyCode::Home => input.home(extend),
+                        _ => input.end(extend),
+                    }
+                }
+                KeyCode::Delete => input.delete(),
                 KeyCode::Char('q') if input.is_empty() => return Ok(()),
                 KeyCode::Tab => scroll.focus = scroll.focus.next(),
                 // left and right switch the project shown (typing is for the reply box)
@@ -379,20 +414,20 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                         Pane::Talk => scroll.talk_back = move_by(scroll.talk_back, -step),
                     }
                 }
-                KeyCode::Char(c) => input.push(c),
-                KeyCode::Backspace => {
-                    input.pop();
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    input.insert(c)
                 }
+                KeyCode::Backspace => input.backspace(),
                 KeyCode::Esc => input.clear(),
                 // Enter on an empty reply box opens or closes the selected task
-                KeyCode::Enter if input.trim().is_empty() && scroll.focus == Pane::Tasks => {
+                KeyCode::Enter if input.text.trim().is_empty() && scroll.focus == Pane::Tasks => {
                     scroll.expanded = match scroll.expanded.take() {
                         Some(id) if Some(&id) == scroll.selected_id.as_ref() => None,
                         _ => scroll.selected_id.clone(),
                     };
                 }
-                KeyCode::Enter if !input.trim().is_empty() => {
-                    let typed = std::mem::take(&mut input).trim().to_string();
+                KeyCode::Enter if !input.text.trim().is_empty() => {
+                    let typed = input.take().trim().to_string();
                     // a choice for the question the agent is waiting on answers it
                     let text = snap
                         .board
@@ -570,6 +605,41 @@ fn copy_to_clipboard(text: &str) {
             let _ = child.wait();
         }
     }
+}
+
+/// The reply box's text as shown, its selection reversed; lines kept.
+fn styled_input(display: &str, sel: Option<(usize, usize)>) -> ratatui::text::Text<'static> {
+    use ratatui::text::{Line, Span, Text};
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut buf = String::new();
+    let mut in_sel = false;
+    let flush = |buf: &mut String, spans: &mut Vec<Span<'static>>, in_sel: bool| {
+        if !buf.is_empty() {
+            let style = if in_sel {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            spans.push(Span::styled(std::mem::take(buf), style));
+        }
+    };
+    for (i, ch) in display.chars().enumerate() {
+        if ch == '\n' {
+            flush(&mut buf, &mut spans, in_sel);
+            lines.push(Line::from(std::mem::take(&mut spans)));
+            continue;
+        }
+        let s = sel.is_some_and(|(a, b)| i >= a && i < b);
+        if s != in_sel {
+            flush(&mut buf, &mut spans, in_sel);
+            in_sel = s;
+        }
+        buf.push(ch);
+    }
+    flush(&mut buf, &mut spans, in_sel);
+    lines.push(Line::from(spans));
+    Text::from(lines)
 }
 
 /// A pane's inside: its border taken off.
@@ -799,10 +869,7 @@ fn draw(
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]).split(f.area());
     let (bar, main) = (rows[0], rows[1]);
     let width = layout(main, 3).input.width;
-    let a = layout(
-        main,
-        input_height(wrapped_rows(&format!("{input}▏"), width), main.height),
-    );
+    let a = layout(main, input_height(wrapped_rows(input, width), main.height));
     scroll.areas = Some(a);
     let at = now();
     let title = match error {
@@ -963,7 +1030,7 @@ fn draw(
     );
     let hint = " say something - Enter sends, Esc clears ".to_string();
     f.render_widget(
-        Paragraph::new(format!("{input}▏"))
+        Paragraph::new(styled_input(input, scroll.input_sel))
             .wrap(Wrap { trim: false })
             .block(Block::default().borders(Borders::ALL).title(hint)),
         a.input,
