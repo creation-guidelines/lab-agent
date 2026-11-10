@@ -1007,8 +1007,11 @@ fn draw(
         cols[1],
     );
     f.render_widget(
-        Paragraph::new(format!(" \u{25cf} Claude {}", agent_state(&snap.board, at)))
-            .style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+        {
+            let (mood, text) = agent_status(&snap.board, at);
+            let (sign, style) = mood.look();
+            Paragraph::new(format!(" {sign} Claude {text}")).style(style)
+        },
         cols[0],
     );
     f.render_widget(
@@ -1042,6 +1045,64 @@ fn agent_label(running: Option<&str>, installed: &str) -> String {
         Some(v) => format!(" agent {v} "),
         None => String::new(),
     }
+}
+
+/// The agent's state at a glance, most important first: it asked you something, a device's health
+/// regressed, it waits (a job, a time), it works on a task, or nothing is open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mood {
+    AwaitingYou,
+    Alert,
+    Waiting,
+    Working,
+    Idle,
+}
+
+impl Mood {
+    /// The fixed sign at the bar's left, and its colors.
+    fn look(self) -> (&'static str, Style) {
+        let s = Style::default();
+        match self {
+            Mood::AwaitingYou => (
+                "\u{270b}",
+                s.fg(Color::White)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Mood::Alert => (
+                "\u{26a0}",
+                s.fg(Color::White)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Mood::Waiting => ("\u{23f3}", s.fg(Color::Black).bg(Color::Yellow)),
+            Mood::Working => ("\u{2699}", s.fg(Color::Black).bg(Color::Cyan)),
+            Mood::Idle => ("\u{25cf}", s.fg(Color::White).bg(Color::DarkGray)),
+        }
+    }
+}
+
+/// The state, and what the bar says of it.
+fn agent_status(board: &Board, at: f64) -> (Mood, String) {
+    if let Some(q) = board.questions.last() {
+        return (Mood::AwaitingYou, format!("asks you: {}", q.text));
+    }
+    if let Some(t) = board
+        .tasks
+        .iter()
+        .find(|t| t.state == State::Ongoing && t.id.starts_with("health-"))
+    {
+        return (Mood::Alert, format!("alert: {}", t.text));
+    }
+    let text = agent_state(board, at);
+    let mood = if text.starts_with("waits ") {
+        Mood::Waiting
+    } else if text == "is idle" {
+        Mood::Idle
+    } else {
+        Mood::Working
+    };
+    (mood, text)
 }
 
 /// What the agent is doing, for the status bar: its wait with the time left, else the task it
@@ -1428,5 +1489,39 @@ mod tests {
         assert_eq!(base64(b"hello"), "aGVsbG8=");
         assert_eq!(base64(b"hi"), "aGk=");
         assert_eq!(base64(b""), "");
+    }
+
+    #[test]
+    fn the_bar_shows_the_most_important_state() {
+        let mut b = Board::default();
+        assert_eq!(agent_status(&b, 0.0).0, Mood::Idle);
+        board::apply(&mut b, "set", Some("x"), Some("building"), 1.0).unwrap();
+        assert_eq!(agent_status(&b, 2.0).0, Mood::Working);
+        board::apply(&mut b, "waiting", Some("60"), Some("job build"), 2.0).unwrap();
+        assert_eq!(agent_status(&b, 3.0).0, Mood::Waiting);
+        board::apply(
+            &mut b,
+            "set",
+            Some("health-xiaomi-surya"),
+            Some("sound regressed"),
+            3.0,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_status(&b, 4.0).0,
+            Mood::Alert,
+            "an alert outranks a wait"
+        );
+        b.questions.push(board::Question {
+            id: "q".into(),
+            text: "go?".into(),
+            choices: vec![],
+            at: 4.0,
+        });
+        assert_eq!(
+            agent_status(&b, 5.0),
+            (Mood::AwaitingYou, "asks you: go?".to_string()),
+            "a question to you outranks all"
+        );
     }
 }

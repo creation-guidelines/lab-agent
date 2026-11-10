@@ -220,7 +220,37 @@ pub fn logs(resolved: &Resolution) -> Result<i32> {
 
 /// Polls the job's result until it finishes or `within` elapses. Reads are conditional (ETag), so
 /// polling every second costs almost nothing against the rate limit.
-fn wait_for(
+/// Waits for a job, the wait shown on the board while it lasts: "job NAME", with its limit. The
+/// board's wait is cleared after, if it is still this one; a board that cannot be reached does not
+/// stop the waiting.
+fn wait_for(client: &Client, cfg: &Config, job: &str, within: Duration, json: bool) -> Result<i32> {
+    let what = format!("job {job}");
+    let until = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+        + within.as_secs_f64();
+    let shown = crate::board::change_board_here(|b| {
+        b.agent_wait = Some(crate::board::AgentWait {
+            until,
+            what: what.clone(),
+        });
+        Ok(())
+    })
+    .is_ok();
+    let result = wait_for_job(client, cfg, job, within, json);
+    if shown {
+        let _ = crate::board::change_board_here(|b| {
+            if b.agent_wait.as_ref().is_some_and(|w| w.what == what) {
+                b.agent_wait = None;
+            }
+            Ok(())
+        });
+    }
+    result
+}
+
+fn wait_for_job(
     client: &Client,
     cfg: &Config,
     name: &str,
