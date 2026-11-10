@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.25]
+
+
+### Features
+- A status bar with a quit button and the agent's state; times in local time ([#67](https://github.com/creation-guidelines/lab-agent/pull/67)) ([9c54284])
+
+
+
 ## [0.1.24]
 
 
