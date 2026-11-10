@@ -2,6 +2,14 @@
 
 Instructions for an AI agent working in this repository.
 
+
+## Start every session: `lab-agent guide`
+
+It prints how to work in the open-commons ecosystem - the practices for agents and people, read live
+from the observatory (open-commons-observatory/open-commons-observatory.github.io,
+design/data/practices.json). Keep your memory and preferences in line with them; when you find a
+better way, carry it back there - everything is still being perfected.
+
 ## How work is done here
 
 - **On the lab machine, never in an agent's own sandbox**: edits, builds and tests run there through

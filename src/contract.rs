@@ -36,6 +36,7 @@ pub enum Command {
     Inbox,
     Ask,
     SelfUpdate,
+    Guide,
     RootExec,
     Completions,
     Man,
@@ -56,6 +57,7 @@ impl Command {
         Command::Inbox,
         Command::Ask,
         Command::SelfUpdate,
+        Command::Guide,
         Command::RootExec,
         Command::Completions,
         Command::Man,
@@ -77,6 +79,7 @@ impl Command {
             Command::Inbox => "inbox",
             Command::Ask => "ask",
             Command::SelfUpdate => "self-update",
+            Command::Guide => "guide",
             Command::RootExec => "root-exec",
             Command::Completions => "completions",
             Command::Man => "man",
@@ -106,6 +109,7 @@ impl Command {
                 "Your messages from the ntfy inbox channel: inbox [--ack] [--reply TEXT]"
             }
             Command::Ask => "Ask the user with buttons on the desktop; prints the button pressed",
+            Command::Guide => "How to work in the open-commons ecosystem: the practices, live from the observatory",
             Command::SelfUpdate => {
                 "Update lab-agent through pacman (--within N: wait up to N s for a newer one); the agent switches to it when no job runs"
             }
