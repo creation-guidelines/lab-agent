@@ -158,6 +158,9 @@ struct Shared {
     in_flight: Mutex<HashSet<String>>,
 }
 
+/// The running agent's version, process and start time, in the state directory.
+pub const AGENT_FILE: &str = "agent.json";
+
 /// A poisoned lock means another thread panicked, not that the data is wrong; keep going.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -194,6 +197,13 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
         claimed.len()
     );
 
+    // which agent runs, for the board: its version, process and start
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let me = serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "pid": std::process::id(), "started": started});
+    let _ = std::fs::write(state_dir.join(AGENT_FILE), me.to_string());
     {
         let shared = Arc::clone(&shared);
         let state_dir = state_dir.clone();
