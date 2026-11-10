@@ -48,14 +48,28 @@ impl Pane {
 
 /// Where each pane is scrolled to. Tasks and jobs count rows from the top; the conversation counts
 /// from the bottom, so that at 0 it follows new messages.
-#[derive(Default, Clone, Copy, Debug)]
+#[derive(Default, Clone, Debug)]
 struct Scroll {
     focus: Pane,
-    tasks: usize,
+    /// The selected task (in the tasks shown), and the one expanded to its full text, by id.
+    selected: usize,
+    expanded: Option<String>,
+    /// Where each shown task was drawn (top row, height, id), so a click can find it; the first
+    /// drawn is task number `hits_from` of those shown.
+    task_hits: Vec<(u16, u16, String)>,
+    hits_from: usize,
+    /// The id of the selected task, as last drawn.
+    selected_id: Option<String>,
     jobs: usize,
     talk_back: usize,
     /// The project shown: 0 is all, then the board's projects in order.
     project: usize,
+}
+
+impl Scroll {
+    fn task_hits_offset(&self) -> usize {
+        self.hits_from
+    }
 }
 
 /// An offset that keeps a page of `visible` rows inside `total`.
@@ -172,6 +186,11 @@ pub fn run(resolved: &Resolution) -> Result<()> {
     let (mut pending, mut next_id) = (Vec::<Pending>::new(), 0u64);
     let mut scroll = Scroll::default();
     let mut terminal = ratatui::try_init()?;
+    // clicks select and expand tasks (shift-drag still selects text in most terminals)
+    ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::EnableMouseCapture
+    )?;
     let (mut snap, mut error, mut input) = (Snapshot::default(), None::<String>, String::new());
     let result = (|| -> Result<()> {
         loop {
@@ -207,8 +226,28 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             if !event::poll(TICK)? {
                 continue;
             }
-            let Event::Key(key) = event::read()? else {
-                continue;
+            let key = match event::read()? {
+                Event::Key(key) => key,
+                Event::Mouse(mouse) => {
+                    if let event::MouseEventKind::Down(event::MouseButton::Left) = mouse.kind {
+                        let hit = scroll
+                            .task_hits
+                            .iter()
+                            .position(|(y, h, _)| mouse.row >= *y && mouse.row < y + h);
+                        if let Some(i) = hit {
+                            let id = scroll.task_hits[i].2.clone();
+                            scroll.focus = Pane::Tasks;
+                            scroll.expanded = if scroll.expanded.as_deref() == Some(id.as_str()) {
+                                None
+                            } else {
+                                Some(id)
+                            };
+                            scroll.selected = i + scroll.task_hits_offset();
+                        }
+                    }
+                    continue;
+                }
+                _ => continue,
             };
             if key.kind != KeyEventKind::Press {
                 continue;
@@ -239,7 +278,7 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     };
                     let move_by = |v: usize, d: isize| (v as isize + d).max(0) as usize;
                     match scroll.focus {
-                        Pane::Tasks => scroll.tasks = move_by(scroll.tasks, step),
+                        Pane::Tasks => scroll.selected = move_by(scroll.selected, step),
                         Pane::Jobs => scroll.jobs = move_by(scroll.jobs, step),
                         // the conversation is measured from its end: up goes back in time
                         Pane::Talk => scroll.talk_back = move_by(scroll.talk_back, -step),
@@ -250,6 +289,13 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     input.pop();
                 }
                 KeyCode::Esc => input.clear(),
+                // Enter on an empty reply box opens or closes the selected task
+                KeyCode::Enter if input.trim().is_empty() && scroll.focus == Pane::Tasks => {
+                    scroll.expanded = match scroll.expanded.take() {
+                        Some(id) if Some(&id) == scroll.selected_id.as_ref() => None,
+                        _ => scroll.selected_id.clone(),
+                    };
+                }
                 KeyCode::Enter if !input.trim().is_empty() => {
                     let text = std::mem::take(&mut input).trim().to_string();
                     next_id += 1;
@@ -270,15 +316,58 @@ pub fn run(resolved: &Resolution) -> Result<()> {
             }
         }
     })();
+    let _ = ratatui::crossterm::execute!(
+        std::io::stdout(),
+        ratatui::crossterm::event::DisableMouseCapture
+    );
     ratatui::restore();
     result
 }
 
-/// Rows the reply box needs for `chars` characters (and the cursor) at `width` columns inside its
-/// borders, between one and six: it grows with the message instead of hiding it past the edge.
-fn input_rows(chars: usize, width: u16) -> u16 {
-    let width = usize::from(width.saturating_sub(2).max(1));
-    ((chars + 1).div_ceil(width)).clamp(1, 6) as u16
+/// Rows `text` takes inside a box `width` columns wide (borders included), wrapped exactly the
+/// way it is drawn.
+fn wrapped_rows(text: &str, width: u16) -> usize {
+    Paragraph::new(text.to_string())
+        .wrap(Wrap { trim: false })
+        .line_count(width.saturating_sub(2).max(1))
+}
+
+/// The reply box's height: what is typed (and the cursor) as drawn, plus its borders. It grows
+/// with the message until three lines of the window are left above it.
+fn input_height(text_rows: usize, window: u16) -> u16 {
+    let most = window.saturating_sub(3).max(3);
+    (text_rows.min(usize::from(u16::MAX)) as u16 + 2).clamp(3, most)
+}
+
+/// `text` broken into lines of at most `width` characters, at spaces where it can be.
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = vec![String::new()];
+    for word in text.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+        loop {
+            let line = lines.last_mut().expect("never empty");
+            let used = line.chars().count();
+            let gap = usize::from(used > 0);
+            if used + gap + word.len() <= width {
+                if gap == 1 {
+                    line.push(' ');
+                }
+                line.extend(word.iter());
+                break;
+            }
+            if used > 0 {
+                lines.push(String::new());
+                continue;
+            }
+            // a word longer than a line: split it
+            let rest = word.split_off(width);
+            line.extend(word.iter());
+            word = rest;
+            lines.push(String::new());
+        }
+    }
+    lines
 }
 
 /// The window's shape, in terms of what fits: terminal cells are about twice as tall as wide.
@@ -310,7 +399,7 @@ struct Areas {
 
 /// `input` is the reply box's height, borders included (it grows with what is typed).
 fn layout(area: Rect, input: u16) -> Areas {
-    use Constraint::{Length, Min, Percentage};
+    use Constraint::{Fill, Length, Percentage};
     let split = |dir, area, c: &[Constraint]| {
         Layout::default()
             .direction(dir)
@@ -329,7 +418,7 @@ fn layout(area: Rect, input: u16) -> Areas {
                 cols[0],
                 &[Percentage(50), Percentage(50)],
             );
-            let right = split(Direction::Vertical, cols[1], &[Min(3), Length(input)]);
+            let right = split(Direction::Vertical, cols[1], &[Fill(1), Length(input)]);
             Areas {
                 tasks: left[0],
                 jobs: left[1],
@@ -341,7 +430,7 @@ fn layout(area: Rect, input: u16) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(45), Min(5), Length(input)],
+                &[Percentage(45), Fill(1), Length(input)],
             );
             let top = split(
                 Direction::Horizontal,
@@ -359,7 +448,7 @@ fn layout(area: Rect, input: u16) -> Areas {
             let rows = split(
                 Direction::Vertical,
                 area,
-                &[Percentage(28), Min(5), Length(input), Percentage(24)],
+                &[Percentage(28), Fill(1), Length(input), Percentage(24)],
             );
             Areas {
                 tasks: rows[0],
@@ -499,7 +588,10 @@ fn draw(
 ) {
     // the box's width does not depend on its height: measure with one row, then grow it
     let width = layout(f.area(), 3).input.width;
-    let a = layout(f.area(), input_rows(input.chars().count(), width) + 2);
+    let a = layout(
+        f.area(),
+        input_height(wrapped_rows(&format!("{input}▏"), width), f.area().height),
+    );
     let at = now();
     let title = match error {
         Some(e) => format!(" control board ({source}) - cannot read: {e} "),
@@ -513,21 +605,44 @@ fn draw(
     scroll.project = scroll.project.min(projects.len());
     let (tabs, shown) = project_tabs(&projects, scroll.project);
     let title = format!("{title}- {tabs} (← →) ");
-    let task_rows: Vec<Row> = snap
+    let shown_tasks: Vec<&board::Task> = snap
         .board
         .ordered()
         .into_iter()
         .filter(|t| shown.is_none() || t.project == shown)
-        .map(|t| {
+        .collect();
+    scroll.selected = scroll.selected.min(shown_tasks.len().saturating_sub(1));
+    scroll.selected_id = shown_tasks.get(scroll.selected).map(|t| t.id.clone());
+    // the text column: what is left after the state and age columns, the borders and the gaps
+    let text_width = usize::from(a.tasks.width.saturating_sub(2 + 17 + 15 + 2)).max(8);
+    let focused = scroll.focus == Pane::Tasks;
+    let task_rows: Vec<Row> = shown_tasks
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
             let (mark, style) = look(t.state);
-            Row::new(vec![
+            let open = scroll.expanded.as_deref() == Some(t.id.as_str());
+            let mut text = wrap_text(&t.text, text_width);
+            if !open && text.len() > 1 {
+                let first: String = text[0].chars().take(text_width.saturating_sub(1)).collect();
+                text = vec![format!("{first}…")];
+            }
+            let height = text.len().max(1) as u16;
+            let row = Row::new(vec![
                 Cell::from(format!("{mark} {}", t.state.word())).style(style),
-                Cell::from(t.text.clone()),
+                Cell::from(text.join("\n")),
                 Cell::from(age(t, at)),
             ])
+            .height(height);
+            if focused && i == scroll.selected {
+                row.style(Style::default().add_modifier(Modifier::REVERSED))
+            } else {
+                row
+            }
         })
         .collect();
-    f.render_widget(
+    let mut state = ratatui::widgets::TableState::default().with_selected(Some(scroll.selected));
+    f.render_stateful_widget(
         Table::new(
             task_rows,
             [
@@ -536,9 +651,27 @@ fn draw(
                 Constraint::Length(15),
             ],
         )
-        .block(frame(title, scroll.focus == Pane::Tasks)),
+        .block(frame(title, focused)),
         a.tasks,
+        &mut state,
     );
+    // where each task landed, so a click can find it
+    scroll.hits_from = state.offset();
+    scroll.task_hits.clear();
+    let mut y = a.tasks.y + 1;
+    for t in shown_tasks.iter().skip(state.offset()) {
+        let open = scroll.expanded.as_deref() == Some(t.id.as_str());
+        let h = if open {
+            wrap_text(&t.text, text_width).len().max(1) as u16
+        } else {
+            1
+        };
+        if y >= a.tasks.y + a.tasks.height.saturating_sub(1) {
+            break;
+        }
+        scroll.task_hits.push((y, h, t.id.clone()));
+        y += h;
+    }
     let job_rows: Vec<Row> = snap
         .jobs
         .iter()
@@ -582,21 +715,18 @@ fn draw(
             .map(said)
             .collect();
     lines.extend(pending.iter().map(on_its_way));
-    let width = a.talk.width.saturating_sub(2).max(1) as usize;
-    let rows: usize = lines.iter().map(|l| l.width().div_ceil(width).max(1)).sum();
+    let talk = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let rows = talk.line_count(a.talk.width.saturating_sub(2).max(1));
     let visible = a.talk.height.saturating_sub(2) as usize;
     scroll.talk_back = clamp_offset(scroll.talk_back, rows, visible);
     let top = rows
         .saturating_sub(visible)
         .saturating_sub(scroll.talk_back) as u16;
     f.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: false })
-            .scroll((top, 0))
-            .block(frame(
-                " conversation (Tab: next pane) ".into(),
-                scroll.focus == Pane::Talk,
-            )),
+        talk.scroll((top, 0)).block(frame(
+            " conversation (Tab: next pane) ".into(),
+            scroll.focus == Pane::Talk,
+        )),
         a.talk,
     );
     let hint = " say something - Enter sends, Esc clears ".to_string();
@@ -661,21 +791,41 @@ mod tests {
     }
 
     #[test]
-    fn the_reply_box_grows_with_the_message_and_stops_at_six_rows() {
-        assert_eq!(input_rows(0, 42), 1);
+    fn the_reply_box_grows_on_the_first_wrapped_sign_until_three_lines_are_left() {
+        // 40 columns inside the borders; words wrap whole, so a word that does not fit moves down
+        assert_eq!(wrapped_rows(&format!("{}▏", "a".repeat(39)), 42), 1);
         assert_eq!(
-            input_rows(39, 42),
-            1,
-            "40 columns inside the borders: 39 chars and the cursor fit"
+            wrapped_rows(&format!("{}▏", "a".repeat(40)), 42),
+            2,
+            "one sign over: a new line"
         );
-        assert_eq!(input_rows(40, 42), 2);
-        assert_eq!(input_rows(10_000, 42), 6);
+        assert_eq!(
+            wrapped_rows(&format!("{} {}▏", "a".repeat(30), "b".repeat(15)), 42),
+            2,
+            "the word moves whole"
+        );
+        assert_eq!(input_height(1, 40), 3);
+        assert_eq!(
+            input_height(100, 40),
+            37,
+            "three lines of the window stay above it"
+        );
         let small = layout(r(48, 90), 3);
-        let grown = layout(r(48, 90), 8);
+        let grown = layout(r(48, 90), 20);
         assert!(
-            grown.input.height == 8 && grown.talk.height < small.talk.height,
+            grown.input.height == 20 && grown.talk.height < small.talk.height,
             "the conversation gives up the room"
         );
+    }
+
+    #[test]
+    fn task_text_wraps_at_spaces_and_splits_words_longer_than_a_line() {
+        assert_eq!(
+            wrap_text("reply box grows with the text", 10),
+            ["reply box", "grows with", "the text"]
+        );
+        assert_eq!(wrap_text("abcdefghijkl", 5), ["abcde", "fghij", "kl"]);
+        assert_eq!(wrap_text("", 5), [""]);
     }
 
     #[test]
