@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.32]
+
+
+### Bug Fixes
+- The status bar shows the task touched last, not the one started last ([#83](https://github.com/creation-guidelines/lab-agent/pull/83)) ([70d469c])
+
+
+
 ## [0.1.31]
 
 
