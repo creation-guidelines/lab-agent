@@ -895,8 +895,9 @@ fn agent_state(board: &Board, at: f64) -> String {
         .iter()
         .filter(|t| t.state == State::Ongoing)
         .max_by(|a, b| {
-            a.since
-                .partial_cmp(&b.since)
+            let when = |t: &crate::board::Task| t.touched.unwrap_or(t.since);
+            when(a)
+                .partial_cmp(&when(b))
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|t| format!("is working on: {}", t.text))
@@ -1082,6 +1083,7 @@ mod tests {
                 id: format!("t{i}"),
                 text: format!("{long} {i}"),
                 since: 0.0,
+                touched: None,
                 state: State::Ongoing,
                 done_at: None,
                 project: Some(
@@ -1202,5 +1204,14 @@ mod tests {
     fn a_paste_keeps_its_lines_and_plain_newlines() {
         assert_eq!(pasted("one\r\ntwo\rthree\nfour"), "one\ntwo\nthree\nfour");
         assert_eq!(pasted("no newline"), "no newline");
+    }
+
+    #[test]
+    fn the_status_bar_follows_the_task_touched_last_not_the_one_started_last() {
+        let mut b = Board::default();
+        board::apply(&mut b, "set", Some("old"), Some("started first"), 10.0).unwrap();
+        board::apply(&mut b, "set", Some("new"), Some("started later"), 20.0).unwrap();
+        board::apply(&mut b, "set", Some("old"), Some("updated just now"), 30.0).unwrap();
+        assert_eq!(agent_state(&b, 31.0), "is working on: updated just now");
     }
 }
