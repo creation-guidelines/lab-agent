@@ -1,6 +1,18 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.31]
+
+
+### Bug Fixes
+- A paste into the board chat arrives whole ([#82](https://github.com/creation-guidelines/lab-agent/pull/82)) ([b88bc62])
+
+
+### Documentation
+- Lists go to commands as arguments, never spliced into a shell string ([#80](https://github.com/creation-guidelines/lab-agent/pull/80)) ([4192ba3])
+
+
+
 ## [0.1.30]
 
 
