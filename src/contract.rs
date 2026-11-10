@@ -339,7 +339,7 @@ contract! {
     BOARD_ACTION: String, Command = Input {
         key:         "action",
         ty:          Type::Enum,
-        allowed:     &["show", "set", "plan", "wait", "pause", "resume", "done", "every", "clear", "waiting"],
+        allowed:     &["show", "set", "plan", "wait", "pause", "resume", "done", "remove", "every", "clear", "waiting"],
         subcommands: &[Command::Board],
         arg:         Some(Arg { value_name: "ACTION", ..Arg::positional(0) }),
         summary:     "show, set, wait, pause, resume, done, every, clear (none: a live view)",

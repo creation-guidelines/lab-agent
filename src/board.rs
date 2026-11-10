@@ -297,6 +297,13 @@ pub fn apply_in(
                     anyhow::anyhow!("usage: lab-agent board every MINUTES (a whole number above 0)")
                 })?;
         }
+        // board remove ID: a task dropped, not done - it leaves the board
+        "remove" => {
+            let id = id.ok_or_else(|| anyhow::anyhow!("usage: lab-agent board remove ID"))?;
+            let before = board.tasks.len();
+            board.tasks.retain(|t| t.id != id);
+            anyhow::ensure!(board.tasks.len() < before, "no task {id} on the board");
+        }
         "clear" => board.tasks.clear(),
         // board waiting SECONDS "what for": a countdown on the board; 0 clears it
         "waiting" => {
@@ -1064,5 +1071,14 @@ mod tests {
         assert_eq!(k1, digest_key(&b), "the same board, later: the same key");
         apply(&mut b, "set", Some("a"), Some("testing"), 400.0).unwrap();
         assert_ne!(k1, digest_key(&b), "a task's new text is news");
+    }
+
+    #[test]
+    fn a_dropped_task_leaves_the_board_and_an_unknown_one_is_refused() {
+        let mut b = Board::default();
+        apply(&mut b, "plan", Some("idea"), Some("a proposal"), 1.0).unwrap();
+        apply(&mut b, "remove", Some("idea"), None, 2.0).unwrap();
+        assert!(b.tasks.is_empty());
+        assert!(apply(&mut b, "remove", Some("idea"), None, 3.0).is_err());
     }
 }
