@@ -297,7 +297,16 @@ pub fn run(resolved: &Resolution) -> Result<()> {
                     };
                 }
                 KeyCode::Enter if !input.trim().is_empty() => {
-                    let text = std::mem::take(&mut input).trim().to_string();
+                    let typed = std::mem::take(&mut input).trim().to_string();
+                    // a choice for the question the agent is waiting on answers it
+                    let text = snap
+                        .board
+                        .questions
+                        .last()
+                        .and_then(|q| {
+                            board::choice_for(q, &typed).map(|c| board::answer_text(&q.id, &c))
+                        })
+                        .unwrap_or(typed);
                     next_id += 1;
                     pending.push(Pending {
                         id: next_id,
@@ -715,6 +724,26 @@ fn draw(
             .map(said)
             .collect();
     lines.extend(pending.iter().map(on_its_way));
+    // questions the agent is waiting on, last, so they are always in view
+    for q in &snap.board.questions {
+        let ask = Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::BOLD);
+        lines.push(Line::from(Span::styled(
+            format!("? Claude asks: {}", q.text),
+            ask,
+        )));
+        let options: Vec<String> = q
+            .choices
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{} = {c}", i + 1))
+            .collect();
+        lines.push(Line::from(Span::styled(
+            format!("  answer here: type {} and press Enter", options.join(", ")),
+            Style::default().fg(Color::Magenta),
+        )));
+    }
     let talk = Paragraph::new(lines).wrap(Wrap { trim: false });
     let rows = talk.line_count(a.talk.width.saturating_sub(2).max(1));
     let visible = a.talk.height.saturating_sub(2) as usize;
@@ -724,7 +753,25 @@ fn draw(
         .saturating_sub(scroll.talk_back) as u16;
     f.render_widget(
         talk.scroll((top, 0)).block(frame(
-            " conversation (Tab: next pane) ".into(),
+            {
+                // what the agent waits for, counting down
+                let waiting = snap
+                    .board
+                    .agent_wait
+                    .as_ref()
+                    .filter(|w| w.until > at)
+                    .map(|w| {
+                        let left = (w.until - at) as u64;
+                        format!(
+                            "- Claude waits {}:{:02} for {} ",
+                            left / 60,
+                            left % 60,
+                            w.what
+                        )
+                    })
+                    .unwrap_or_default();
+                format!(" conversation (Tab: next pane) {waiting}")
+            },
             scroll.focus == Pane::Talk,
         )),
         a.talk,
