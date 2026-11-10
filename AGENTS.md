@@ -7,6 +7,9 @@ Instructions for an AI agent working in this repository.
 - **On the lab machine, never in an agent's own sandbox**: edits, builds and tests run there through
   lab-agent jobs, in this clone (`~/Projects/creation-guidelines/lab-agent`) and the pinned shell
   (`nix-shell shell.nix`; `NIX_PATH` is pinned for jobs by lab-machine's `setup/nix-path.sh`).
+- **Updating the agent**: `lab-agent self-update` only installs; the running agent switches to the
+  new program by itself (re-executing in place) as soon as no job runs or result is being pushed - so
+  an update never cuts a job off, and nobody has to time it.
 - **Landing a branch**: `land` (lab-machine's `bin/land`, linked into `~/.local/bin`) opens or reuses
   the PR from the commit, waits for every check, refuses on a failing one, squash-merges and updates
   main. A job's checks must stop it before it pushes - never pipe a check's output through a filter
