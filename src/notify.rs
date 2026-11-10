@@ -71,7 +71,16 @@ pub struct Sent {
 }
 
 pub fn record_sent(level: Level, title: &str, message: &str) {
-    let path = crate::daemon::state_dir().join(SENT_LOG);
+    record_sent_to(
+        &crate::daemon::state_dir().join(SENT_LOG),
+        level,
+        title,
+        message,
+    );
+}
+
+fn record_sent_to(path: &std::path::Path, level: Level, title: &str, message: &str) {
+    let path = path.to_path_buf();
     let at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -153,6 +162,8 @@ fn save(cfg: &NotifyConfig) -> Result<()> {
 pub struct Notifier {
     cfg: NotifyConfig,
     agent: ureq::Agent,
+    /// Where what is sent is recorded for the board's conversation; none for a notifier in a test.
+    log: Option<std::path::PathBuf>,
 }
 
 impl Notifier {
@@ -160,7 +171,15 @@ impl Notifier {
         Notifier {
             cfg,
             agent: ureq::AgentBuilder::new().build(),
+            log: Some(crate::daemon::state_dir().join(SENT_LOG)),
         }
+    }
+
+    /// The same notifier, recording nothing - for tests, which must never touch the machine's state.
+    #[cfg(test)]
+    pub fn without_log(mut self) -> Self {
+        self.log = None;
+        self
     }
 
     /// Sends `message` to the channel for `level`, and shows it as a desktop popup too.
@@ -189,8 +208,11 @@ impl Notifier {
         if self.cfg.desktop && popup {
             crate::desktop::popup(level, title, message);
         }
-        if popup && level != Level::Inbox && title != DIGEST_TITLE {
-            record_sent(level, title, message);
+        if let (true, Some(log)) = (
+            popup && level != Level::Inbox && title != DIGEST_TITLE,
+            &self.log,
+        ) {
+            record_sent_to(log, level, title, message);
         }
         let url = format!("{}/{topic}", self.cfg.server.trim_end_matches('/'));
         let mut request = self
@@ -555,7 +577,8 @@ mod tests {
             inbox_topic: Some("t-inbox".into()),
             token: None,
             desktop: false,
-        });
+        })
+        .without_log();
         n.send(Level::Inbox, "you", "take a break").unwrap();
         let req = seen.lock().unwrap().clone();
         assert!(req.starts_with("POST /t-inbox "), "{req}");
@@ -571,7 +594,8 @@ mod tests {
             inbox_topic: None,
             token: None,
             desktop: false,
-        });
+        })
+        .without_log();
         let err = n.send(Level::Inbox, "you", "hi").unwrap_err().to_string();
         assert!(err.contains("notify-setup"), "{err}");
     }
@@ -632,7 +656,8 @@ mod tests {
             inbox_topic: None,
             token: Some("secret-token".into()),
             desktop: false,
-        });
+        })
+        .without_log();
         n.send(Level::Urgent, "phone stuck", "come and look")
             .unwrap();
         let req = seen.lock().unwrap().clone();
@@ -655,7 +680,8 @@ mod tests {
             inbox_topic: None,
             token: None,
             desktop: false,
-        });
+        })
+        .without_log();
         let err = n.send(Level::Info, "t", "m").unwrap_err().to_string();
         assert!(!err.contains("topsecret"), "{err}");
     }
