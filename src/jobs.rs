@@ -317,7 +317,7 @@ fn local_offset() -> i64 {
             if libc::localtime_r(&now, &mut tm).is_null() {
                 0
             } else {
-                tm.tm_gmtoff as i64
+                i64::from(tm.tm_gmtoff)
             }
         }
     })
