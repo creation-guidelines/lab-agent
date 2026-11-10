@@ -1,0 +1,6 @@
+{"id":"board-tui","title":"A board to work by","status":"done","note":"Tasks, states, projects, the conversation, the status bar, selection and editing.","opened":"2026-11-10"}
+{"id":"boards-as-data","title":"Boards as shared data","status":"open","note":"Each project's tasks as a table the observatory harvests.","opened":"2026-11-10"}
+{"id":"dialogs","title":"Dialogs for half-manual tests","status":"open","note":"A popup that asks a person, whatever the desktop, and waits for the answer.","opened":"2026-11-10"}
+{"id":"guide","title":"Instructs any agent","status":"done","note":"lab-agent guide: the living practices from the observatory.","opened":"2026-11-10"}
+{"id":"jobs","title":"Jobs on the lab machine","status":"done","note":"Submit, wait, results, preemption - the agent's hands.","opened":"2026-11-10"}
+{"id":"quiet","title":"Never in the way","status":"done","note":"Updates switch over when idle; notifications only when something changed; waits show themselves.","opened":"2026-11-10"}

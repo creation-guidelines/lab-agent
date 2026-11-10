@@ -1,0 +1,6 @@
+{"id":"la-board","subject":"lab-agent","ord":2,"title":"A board to work by","horizon":"working","readiness":7,"criteria":"backlog:board-tui","why":"Work seen, as it happens."}
+{"id":"la-dialogs","subject":"lab-agent","ord":6,"title":"Asks people well","horizon":"ongoing","readiness":9,"criteria":"backlog:dialogs","why":"Half-manual tests with a person in the loop."}
+{"id":"la-guide","subject":"lab-agent","ord":4,"title":"Instructs any agent","horizon":"perfection","readiness":8,"criteria":"backlog:guide","why":"Whoever uses it works by the practices."}
+{"id":"la-quiet","subject":"lab-agent","ord":3,"title":"Never in the way","horizon":"perfection","readiness":8,"criteria":"backlog:quiet","why":"It updates, notifies and waits without being minded."}
+{"id":"la-runs","subject":"lab-agent","ord":1,"title":"Runs the agent's work","horizon":"working","readiness":7,"criteria":"backlog:jobs","why":"The lab machine as the agent's hands."}
+{"id":"la-shared","subject":"lab-agent","ord":5,"title":"Boards as shared data","horizon":"ongoing","readiness":9,"criteria":"backlog:boards-as-data","why":"Every board in the picture."}
