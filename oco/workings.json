@@ -1,0 +1,4 @@
+{"id":"w-01","what":"lab-agent submit","kind":"tool","serves":"la-runs","how":"A job goes to the lab machine, runs there, and its output returns.","why":"The work must happen where the hardware is.","evidence":"","uses":""}
+{"id":"w-02","what":"The board","kind":"tool","serves":"la-board","how":"Each task is set, resumed and closed as it happens, and shown in the desktop's status bar.","why":"The person sees what is being done without having to ask.","evidence":"","uses":""}
+{"id":"w-03","what":"The inbox","kind":"tool","serves":"la-dialogs","how":"The person's messages are read at every pause, and each one is answered.","why":"Being heard should not need interrupting.","evidence":"","uses":""}
+{"id":"w-04","what":"lab-agent guide","kind":"tool","serves":"la-guide","how":"Prints the ways of working, read live, to an agent before it works.","why":"Good habits should arrive with the tool.","evidence":"","uses":""}
