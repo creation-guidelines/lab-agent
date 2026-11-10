@@ -160,6 +160,9 @@ pub struct Task {
     pub id: String,
     pub text: String,
     pub since: f64,
+    /// When the task last changed - text, state or project; the status bar shows the latest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub touched: Option<f64>,
     #[serde(default)]
     pub state: State,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -244,6 +247,7 @@ pub fn apply_in(
             match board.tasks.iter_mut().find(|t| t.id == id) {
                 Some(t) => {
                     t.text = text.to_string();
+                    t.touched = Some(at);
                     if t.state == State::Done
                         || (t.state == State::Planned && state == State::Ongoing)
                     {
@@ -259,6 +263,7 @@ pub fn apply_in(
                     id: id.into(),
                     text: text.into(),
                     since: at,
+                    touched: Some(at),
                     state,
                     done_at: None,
                     project: project.map(String::from),
@@ -275,6 +280,7 @@ pub fn apply_in(
             if action == "resume" && t.state == State::Planned {
                 t.since = at;
             }
+            t.touched = Some(at);
             t.state = match action {
                 "wait" => State::Waiting,
                 "pause" => State::Paused,
@@ -740,6 +746,7 @@ mod tests {
             id: "a".into(),
             text: "fixing audio start-up".into(),
             since: 0.0,
+            touched: None,
             state: State::Ongoing,
             done_at: None,
             project: None,
@@ -748,6 +755,7 @@ mod tests {
             id: "b".into(),
             text: "writing it up upstream".into(),
             since: 540.0,
+            touched: None,
             state: State::Ongoing,
             done_at: None,
             project: None,
