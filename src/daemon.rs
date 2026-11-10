@@ -717,6 +717,8 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         let _ = std::fs::write(&inbox_local, &f.content);
     }
     let mut last_digest = std::time::Instant::now() - Duration::from_secs(24 * 3600);
+    // what the last digest said, so an unchanged board is not sent again
+    let mut last_digest_key: Option<String> = None;
     loop {
         std::thread::sleep(BOARD_EVERY);
         let Some(ncfg) = crate::notify::load() else {
@@ -783,15 +785,19 @@ fn watch_board_and_inbox(shared: &Shared, state_dir: &Path) {
         }
         // 2. the digest, while anything is open
         let every = Duration::from_secs(board.every_minutes.max(1) * 60);
+        // Only when the board's substance changed, and every attempt starts the next interval: a
+        // failed send (the server's daily limit) waits its turn instead of retrying every poll.
         if last_digest.elapsed() >= every {
             if let Some(text) = board::digest(&board, now_unix()) {
-                if notifier
-                    .send(Level::Info, crate::notify::DIGEST_TITLE, &text)
-                    .is_ok()
-                {
-                    last_digest = std::time::Instant::now();
+                let key = board::digest_key(&board);
+                if last_digest_key.as_deref() != Some(key.as_str()) {
+                    if let Err(e) = notifier.send(Level::Info, crate::notify::DIGEST_TITLE, &text) {
+                        eprintln!("lab-agent: digest not sent: {e:#}");
+                    }
+                    last_digest_key = Some(key);
                 }
             }
+            last_digest = std::time::Instant::now();
         }
         // 3. the user's new inbox messages, filed in the results repo for the agent
         match crate::notify::poll_inbox(&ncfg, cursor.as_deref()) {

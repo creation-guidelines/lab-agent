@@ -351,6 +351,18 @@ fn now() -> f64 {
         .as_secs_f64()
 }
 
+/// What a digest says, without its elapsed times: the live tasks' states and texts. Two digests
+/// with the same key carry the same news.
+pub fn digest_key(board: &Board) -> String {
+    board
+        .tasks
+        .iter()
+        .filter(|t| matches!(t.state, State::Ongoing | State::Waiting))
+        .map(|t| format!("{}|{:?}|{}", t.id, t.state, t.text))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// The digest of the open tasks, or `None` when there is nothing to report.
 pub fn digest(board: &Board, at: f64) -> Option<String> {
     let live: Vec<&Task> = board
@@ -1042,5 +1054,15 @@ mod tests {
         };
         assert_eq!(answer_in(&inbox, "q1"), Some("Go".into()));
         assert_eq!(answer_in(&inbox, "q2"), None);
+    }
+
+    #[test]
+    fn a_digest_key_changes_with_the_news_not_with_the_clock() {
+        let mut b = Board::default();
+        apply(&mut b, "set", Some("a"), Some("building"), 10.0).unwrap();
+        let k1 = digest_key(&b);
+        assert_eq!(k1, digest_key(&b), "the same board, later: the same key");
+        apply(&mut b, "set", Some("a"), Some("testing"), 400.0).unwrap();
+        assert_ne!(k1, digest_key(&b), "a task's new text is news");
     }
 }
