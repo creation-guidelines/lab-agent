@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.46]
+
+
+### Documentation
+- Its idea in Russian (by machine, for a person to correct) ([#112](https://github.com/creation-guidelines/lab-agent/pull/112)) ([fa19907])
+
+
+
 ## [0.1.45]
 
 
