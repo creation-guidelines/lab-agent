@@ -85,7 +85,7 @@ change.
 
 The journal is not a heap of files in a repository: it is declared tad tables - jobs, their events, steps,
 leases, the author's messages, waits - checked like any tad data and queried with real SQL (tad's query
-command reads the declared tables through an embedded SQLite; a change goes through tad's checks before it is
+command reads the declared tables through DuckDB, as tad's original research chose; a change goes through tad's checks before it is
 kept). Where the tables live is itself an adapter: a folder moved by git today, Redis or a database later.
 And every finished piece of work becomes a glimpse in ocoeco's shared language, so what the hands did is
 intelligible to the whole commons.
