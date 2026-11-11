@@ -90,6 +90,37 @@ kept). Where the tables live is itself an adapter: a folder moved by git today, 
 And every finished piece of work becomes a glimpse in ocoeco's shared language, so what the hands did is
 intelligible to the whole commons.
 
+## How it is built: the canon's ports and adapters, the playbook's names
+
+The canon's default architecture is ports and adapters (hexagonal): the core talks to the world only through
+ports - conversations it defines in its own words - and adapters plug technologies into them; in-memory
+adapters make tests trivial. The ideal-project playbook adds what makes it good:
+
+- **Names explain the program.** Areas are named for what lab-agent is for, never for patterns: taking work,
+  doing it, keeping the journal, holding leases, resuming, speaking (progress and alarms), listening (the
+  author's messages), watching (from outside). A module's first sentence says what it is for, in plain words.
+- **Tool words live only in the adapter that drives them.** GitHub, git, ntfy, systemd, a commit, a push
+  appear in their adapters and nowhere above; the core asks the question it means ("is there new work?",
+  "has the driver gone silent?") and the adapter owns the how.
+- **The boundary is checked, not hoped for.** The core is its own crate with no input or output at all, so
+  the compiler enforces it; the playbook's guards run on every change: purity by role, vocabulary (a tool
+  word above its adapter fails), one place, and findability (a cold reader finds the right area for a real
+  question).
+
+Today's adapters: work arrives and the journal travels through git and GitHub; the voice and the author's
+messages go through ntfy; the machine's service is systemd. Replacing one - git with Redis, ntfy with
+another channel - is a new adapter passing the same checks the in-memory one passes; the core does not
+change.
+
+## The journal is data: tad tables, queried with SQL
+
+The journal is not a heap of files in a repository: it is declared tad tables - jobs, their events, steps,
+leases, the author's messages, waits - checked like any tad data and queried with real SQL (tad's query
+command reads the declared tables through an embedded SQLite; a change goes through tad's checks before it is
+kept). Where the tables live is itself an adapter: a folder moved by git today, Redis or a database later.
+And every finished piece of work becomes a glimpse in ocoeco's shared language, so what the hands did is
+intelligible to the whole commons.
+
 ## Why not adopt a durable-execution engine
 
 Temporal, Restate and their peers solve this in general, but each needs a server to run, secure and keep
