@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.48]
+
+
+### Documentation
+- Delivered by the package conveyor ([#116](https://github.com/creation-guidelines/lab-agent/pull/116)) ([48bc400])
+
+
+
 ## [0.1.47]
 
 
