@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.50]
+
+
+### Documentation
+- Waits recorded where they happen; jobs side by side by their resources ([#120](https://github.com/creation-guidelines/lab-agent/pull/120)) ([1312e06])
+
+
+
 ## [0.1.49]
 
 
