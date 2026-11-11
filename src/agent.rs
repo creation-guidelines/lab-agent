@@ -179,7 +179,14 @@ pub fn submit(resolved: &Resolution) -> Result<i32> {
         .get_from_or_default(resolved)
         .map(Duration::from_secs)
         .unwrap_or(timeout + Duration::from_secs(180));
-    wait_for(&client, &cfg, &name, within, json)
+    wait_for(
+        &client,
+        &cfg,
+        &name,
+        within,
+        json,
+        Contract::WAIT_ON.get_from_or_default(resolved),
+    )
 }
 
 /// `lab-agent wait JOB`: wait for a job, printing its output as it arrives.
@@ -195,7 +202,14 @@ pub fn wait(resolved: &Resolution) -> Result<i32> {
     let json = Contract::JSON
         .get_from_or_default(resolved)
         .unwrap_or(false);
-    wait_for(&client, &cfg, &job, within, json)
+    wait_for(
+        &client,
+        &cfg,
+        &job,
+        within,
+        json,
+        Contract::WAIT_ON.get_from_or_default(resolved),
+    )
 }
 
 /// `lab-agent logs JOB`: the job's output so far.
@@ -223,21 +237,32 @@ pub fn logs(resolved: &Resolution) -> Result<i32> {
 /// Waits for a job, the wait shown on the board while it lasts: "job NAME", with its limit. The
 /// board's wait is cleared after, if it is still this one; a board that cannot be reached does not
 /// stop the waiting.
-fn wait_for(client: &Client, cfg: &Config, job: &str, within: Duration, json: bool) -> Result<i32> {
+fn wait_for(
+    client: &Client,
+    cfg: &Config,
+    job: &str,
+    within: Duration,
+    json: bool,
+    on: Option<String>,
+) -> Result<i32> {
     let what = format!("job {job}");
-    let until = std::time::SystemTime::now()
+    let began = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-        + within.as_secs_f64();
+        .unwrap_or(0.0);
+    let until = began + within.as_secs_f64();
+    // the project this wait is for: noted from the board while the wait is shown on it
+    let project = std::cell::RefCell::new(String::new());
     let shown = crate::board::change_board_here(|b| {
         b.agent_wait = Some(crate::board::AgentWait {
             until,
             what: what.clone(),
         });
+        *project.borrow_mut() = crate::waits::project_now(b);
         Ok(())
     })
     .is_ok();
+    let start = Instant::now();
     let result = wait_for_job(client, cfg, job, within, json);
     if shown {
         let _ = crate::board::change_board_here(|b| {
@@ -246,6 +271,18 @@ fn wait_for(client: &Client, cfg: &Config, job: &str, within: Duration, json: bo
             }
             Ok(())
         });
+    }
+    // every wait records itself; a log that cannot be reached never changes the job's result
+    let w = crate::waits::Wait {
+        at: began as u64,
+        seconds: start.elapsed().as_secs(),
+        on: crate::waits::label(on),
+        project: project.into_inner(),
+        job: job.trim_end_matches(".sh").to_string(),
+        ended: crate::waits::ended(&result),
+    };
+    if let Err(e) = crate::waits::record(client, cfg, &w) {
+        eprintln!("lab-agent: this wait was not recorded: {e}");
     }
     result
 }
