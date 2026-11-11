@@ -4,3 +4,4 @@
 {"id":"la-quiet","subject":"lab-agent","ord":3,"title":"Never in the way","horizon":"perfection","readiness":8,"criteria":"backlog:quiet","why":"It updates, notifies and waits without being minded."}
 {"id":"la-runs","subject":"lab-agent","ord":1,"title":"Runs the agent's work","horizon":"working","readiness":7,"criteria":"backlog:jobs","why":"The lab machine as the agent's hands."}
 {"id":"la-shared","subject":"lab-agent","ord":5,"title":"Boards as shared data","horizon":"ongoing","readiness":9,"criteria":"backlog:boards-as-data","why":"Every board in the picture."}
+{"id":"through-ocoeco","subject":"lab-agent","ord":7,"title":"lab-agent flows through ocoeco","horizon":"perfection","readiness":1,"criteria":"backlog:board-is-the-backlog backlog:updates-from-glimpses backlog:the-authors-word-linked backlog:questions-in-attention backlog:jobs-in-parallel","why":"One memory and one language for all the work; lab-agent its hands and voice."}
