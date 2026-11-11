@@ -4,4 +4,6 @@
 {"id":"dialogs","title":"Dialogs for half-manual tests","status":"open","note":"A popup that asks a person, whatever the desktop, and waits for the answer.","opened":"2026-11-10"}
 {"id":"guide","title":"Instructs any agent","status":"done","note":"lab-agent guide: the living practices from the observatory.","opened":"2026-11-10"}
 {"id":"jobs","title":"Jobs on the lab machine","status":"done","note":"Submit, wait, results, preemption - the agent's hands.","opened":"2026-11-10"}
+{"id":"jobs-in-parallel","title":"Jobs side by side, by the resources they hold","status":"open","note":"A job declares resources (phone:surya, repo:<path>, cpu-heavy); the runner starts any job whose resources are free; the board shows what runs together.","opened":"2026-11-11"}
 {"id":"quiet","title":"Never in the way","status":"done","note":"Updates switch over when idle; notifications only when something changed; waits show themselves.","opened":"2026-11-10"}
+{"id":"waits-recorded","title":"Every wait records itself","status":"open","note":"submit --wait and wait take --on (build, reboot, ci, harvest, ...) and --project; lab-agent writes each wait (start, end, seconds, on, project, job) to its results; a gatherer brings them into the projects' data; the observatory shows waiting beside manual work, and flow efficiency.","opened":"2026-11-11"}
