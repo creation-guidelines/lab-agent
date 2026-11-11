@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.52]
+
+
+### Documentation
+- One shared way for a job to start, check and stop ([#124](https://github.com/creation-guidelines/lab-agent/pull/124)) ([d9c225a])
+
+
+
 ## [0.1.51]
 
 
