@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.47]
+
+
+### CI/CD
+- Deliver through the package conveyor - 187 lines of copied workflow become a declaration ([#114](https://github.com/creation-guidelines/lab-agent/pull/114)) ([698d1f4])
+
+
+
 ## [0.1.46]
 
 
