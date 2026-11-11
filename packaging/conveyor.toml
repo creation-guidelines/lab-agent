@@ -1,0 +1,20 @@
+# How lab-agent is delivered: read by the package conveyor
+# (https://github.com/linux-package-distribution-oco/conveyor). The build scripts, the PKGBUILD and
+# the public key stay here; everything around them lives in the conveyor, once.
+[package]
+name = "lab-agent"
+tag-prefix = "v"
+fingerprint = "B345BA33340C75FB327B22CCDD5D5430E6BA4289"
+key = "packaging/repo/lab-agent-repo.asc"
+
+[binaries]
+build = "packaging/build-binary.sh"
+package = "packaging/build-packages.sh"
+
+[arch]
+pkgbuild = "packaging/arch/PKGBUILD"
+
+[site]
+title = "lab-agent packages"
+docs-crate = "lab_agent"
+verify = "packaging/test/repo-snippet.sh"
