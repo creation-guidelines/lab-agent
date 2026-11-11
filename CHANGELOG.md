@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.51]
+
+
+### Features
+- Every wait records itself - what it was on, for which project, how long ([#122](https://github.com/creation-guidelines/lab-agent/pull/122)) ([43adcb5])
+
+
+
 ## [0.1.50]
 
 
