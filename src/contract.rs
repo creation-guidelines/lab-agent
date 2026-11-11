@@ -251,6 +251,16 @@ contract! {
         ..Input::EMPTY
     };
 
+    /// What a wait is on - a build, a reboot, CI, a harvest; recorded with the wait.
+    WAIT_ON: String, Command = Input {
+        key:         "on",
+        ty:          Type::String,
+        subcommands: &[Command::Submit, Command::Wait],
+        arg:         Some(Arg { value_name: "WHAT", ..Arg::long("on") }),
+        summary:     "What this wait is on: build, reboot, ci, harvest, ... - recorded with the wait",
+        ..Input::EMPTY
+    };
+
     /// The job to wait for or read.
     JOB: String, Command = Input {
         key:         "job",

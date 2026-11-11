@@ -15,6 +15,7 @@ mod jobs;
 mod monitor;
 mod notify;
 mod self_update;
+mod waits;
 
 use anyhow::{bail, Result};
 use argenv_resolve::*;
