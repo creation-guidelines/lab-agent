@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.49]
+
+
+### Documentation
+- Export lab-agent's decisions and log - they never reached the observatory ([#118](https://github.com/creation-guidelines/lab-agent/pull/118)) ([42387d5])
+
+
+
 ## [0.1.48]
 
 
