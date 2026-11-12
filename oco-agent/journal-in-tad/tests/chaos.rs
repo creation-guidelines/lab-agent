@@ -82,6 +82,7 @@ fn two_holders_of_one_folder_cannot_both_take_a_job() {
         what: Happened::Submitted {
             by: "a driver".into(),
             start_by: 100,
+            may_run: 3600,
         },
     })
     .unwrap();
@@ -117,7 +118,8 @@ fn a_writer_that_died_holding_its_turn_does_not_block_the_journal() {
             at: 0,
             what: Happened::Submitted {
                 by: "a driver".into(),
-                start_by: 100
+                start_by: 100,
+                may_run: 3600
             }
         })
         .is_ok());

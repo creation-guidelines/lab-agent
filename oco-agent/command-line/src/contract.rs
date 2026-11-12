@@ -12,6 +12,7 @@ pub enum Command {
     Release,
     Standing,
     Next,
+    Run,
 }
 
 impl Command {
@@ -21,6 +22,7 @@ impl Command {
         Command::Release,
         Command::Standing,
         Command::Next,
+        Command::Run,
     ];
 
     /// How it is typed.
@@ -31,6 +33,7 @@ impl Command {
             Command::Release => "release",
             Command::Standing => "standing",
             Command::Next => "next",
+            Command::Run => "run",
         }
     }
 
@@ -38,10 +41,11 @@ impl Command {
     pub const fn summary(self) -> &'static str {
         match self {
             Command::Beat => "Say you are here: your waiting work may start while you are",
-            Command::Submit => "Ask for a job: submit JOB (asking is itself a beat)",
+            Command::Submit => "Ask for a job: submit JOB --file SCRIPT (asking is itself a beat)",
             Command::Release => "Send a parked job back to wait: release JOB",
             Command::Standing => "Where every job stands, and which drivers are here",
             Command::Next => "What the agent would do now, and why anything waits - it names the acts and takes none",
+            Command::Run => "Do the work: start what may start, write down how each job ends, never run one twice",
         }
     }
 
@@ -66,13 +70,13 @@ pub fn usage() -> String {
 }
 
 contract! {
-    /// Where the journal and the beats are kept.
+    /// Where the journal, the beats and the jobs are kept.
     FOLDER: String = Input {
         key:     "folder",
         ty:      Type::String,
         env:     Some(Env::new("OCO_AGENT_FOLDER")),
         arg:     Some(Arg { value_name: "FOLDER", ..Arg::long("folder") }),
-        summary: "Where the journal and the beats are kept (default: ~/.local/share/oco-agent)",
+        summary: "Where the journal, the beats and the jobs are kept (default: ~/.local/share/oco-agent)",
         ..Input::EMPTY
     };
 
@@ -103,7 +107,17 @@ contract! {
         ty:          Type::String,
         subcommands: &[Command::Submit, Command::Release],
         arg:         Some(Arg { value_name: "JOB", ..Arg::positional(0) }),
-        summary:     "The job's name",
+        summary:     "The job's name: letters, digits, '-', '_' and '.'",
+        ..Input::EMPTY
+    };
+
+    /// The script a job runs.
+    FILE: String, Command = Input {
+        key:         "file",
+        ty:          Type::String,
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "SCRIPT", ..Arg::long("file") }),
+        summary:     "The script the job runs (sh)",
         ..Input::EMPTY
     };
 
@@ -118,12 +132,23 @@ contract! {
         ..Input::EMPTY
     };
 
+    /// How long a job may run.
+    MAY_RUN: u64, Command = Input {
+        key:         "may_run",
+        ty:          Type::Uint,
+        default:     Some(1800),
+        subcommands: &[Command::Submit],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("may-run") }),
+        summary:     "How long the job may run before it is stopped, in seconds",
+        ..Input::EMPTY
+    };
+
     /// How many jobs may run side by side.
     AT_ONCE: u64, Command = Input {
         key:         "at_once",
         ty:          Type::Uint,
         default:     Some(1),
-        subcommands: &[Command::Next],
+        subcommands: &[Command::Next, Command::Run],
         arg:         Some(Arg { value_name: "N", ..Arg::long("at-once") }),
         summary:     "How many jobs may run side by side",
         ..Input::EMPTY
@@ -137,6 +162,17 @@ contract! {
         subcommands: &[Command::Next],
         arg:         Some(Arg { value_name: "N", ..Arg::long("run") }),
         summary:     "Which run of the agent this is (a later run parks what an earlier one left running)",
+        ..Input::EMPTY
+    };
+
+    /// How often the runner looks.
+    EVERY: u64, Command = Input {
+        key:         "every",
+        ty:          Type::Uint,
+        default:     Some(2),
+        subcommands: &[Command::Run],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("every") }),
+        summary:     "How often the runner looks at the journal and its jobs, in seconds",
         ..Input::EMPTY
     };
 }

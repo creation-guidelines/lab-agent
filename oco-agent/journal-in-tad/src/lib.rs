@@ -34,11 +34,11 @@ impl InTad {
         let folder = folder.into();
         std::fs::create_dir_all(folder.join("data")).map_err(unreachable)?;
         let tables = folder.join("tables.toml");
-        if !tables.exists() {
+        // the declaration is this adapter's own: a folder made by an older one is brought up to it
+        if std::fs::read_to_string(&tables).ok().as_deref() != Some(TABLES) {
             std::fs::write(&tables, TABLES).map_err(unreachable)?;
         }
-        let declaration = toml::from_str(&std::fs::read_to_string(&tables).map_err(unreachable)?)
-            .map_err(unreachable)?;
+        let declaration = toml::from_str(TABLES).map_err(unreachable)?;
         Ok(InTad {
             folder,
             declaration,
@@ -85,6 +85,7 @@ fn entry_of(row: &Map<String, Value>) -> Result<(u64, Entry), Trouble> {
         "submitted" => Happened::Submitted {
             by: words(row, "by").to_string(),
             start_by: whole(row, "start_by")?,
+            may_run: row.get("may_run").and_then(Value::as_u64).unwrap_or(3600),
         },
         "claimed" => Happened::Claimed {
             run: whole(row, "run")?,
@@ -128,10 +129,15 @@ fn row_of(entry: &Entry) -> Vec<(String, String)> {
     ];
     let mut put = |field: &str, value: String| row.push((field.to_string(), value));
     match &entry.what {
-        Happened::Submitted { by, start_by } => {
+        Happened::Submitted {
+            by,
+            start_by,
+            may_run,
+        } => {
             put("what", "submitted".into());
             put("by", by.clone());
             put("start_by", start_by.to_string());
+            put("may_run", may_run.to_string());
         }
         Happened::Claimed { run } => {
             put("what", "claimed".into());

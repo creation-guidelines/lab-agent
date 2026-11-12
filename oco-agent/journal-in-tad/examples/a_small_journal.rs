@@ -17,6 +17,7 @@ fn main() {
             Happened::Submitted {
                 by: "the author".into(),
                 start_by: 4000,
+                may_run: 3600,
             },
         ),
         say("land the docs", 101, Happened::Claimed { run: 1 }),
@@ -26,6 +27,7 @@ fn main() {
             Happened::Submitted {
                 by: "Claude".into(),
                 start_by: 4000,
+                may_run: 3600,
             },
         ),
         say("land the docs", 160, Happened::Finished(Outcome::Done)),

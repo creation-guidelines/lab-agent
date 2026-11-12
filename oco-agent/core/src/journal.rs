@@ -22,10 +22,11 @@ pub enum Why {
 /// One thing that happened to a job.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Happened {
-    /// A driver asked for it; it is started by `start_by` or not at all.
+    /// A driver asked for it; it is started by `start_by` or not at all, and may run for `may_run` seconds.
     Submitted {
         by: String,
         start_by: Moment,
+        may_run: u64,
     },
     /// A run of the agent took it. A run's number only ever grows, so a later run outranks an earlier one.
     Claimed {

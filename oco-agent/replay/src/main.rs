@@ -123,6 +123,7 @@ pub fn replay(lines: impl Iterator<Item = String>, journal: &mut dyn Journal) ->
                         what: Happened::Submitted {
                             by: "the old log".into(),
                             start_by: now + DAY,
+                            may_run: 3600,
                         },
                     })
                     .expect("a new job is taken");

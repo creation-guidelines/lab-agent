@@ -18,6 +18,7 @@ fn submit(journal: &mut impl Journal, job: &str, at: Moment) {
             what: Happened::Submitted {
                 by: "a driver".into(),
                 start_by: at + HOUR,
+                may_run: 3600,
             },
         })
         .expect("a new job is taken");
@@ -271,6 +272,7 @@ pub fn it_gives_back_what_it_was_given(journal: &mut impl Journal) {
             what: Happened::Submitted {
                 by: "the author".into(),
                 start_by: 9,
+                may_run: 3600,
             },
         },
         Entry {
@@ -304,6 +306,7 @@ pub fn it_gives_back_what_it_was_given(journal: &mut impl Journal) {
             what: Happened::Submitted {
                 by: "a machine".into(),
                 start_by: 8,
+                may_run: 3600,
             },
         },
         Entry {
@@ -328,6 +331,7 @@ pub fn a_job_waits_for_its_own_driver(journal: &mut impl Journal) {
                 what: Happened::Submitted {
                     by: by.into(),
                     start_by: HOUR,
+                    may_run: 3600,
                 },
             })
             .expect("a new job is taken");

@@ -14,6 +14,7 @@ fields = [
     { name = "run", type = "integer" },
     { name = "outcome", type = "string", enum = ["done", "failed", "timed-out"] },
     { name = "why", type = "string", enum = ["the-agent-restarted"] },
+    { name = "may_run", type = "integer" },
 ]
 
 # When each driver was last heard from: what is known now, not a history - one row per driver.
