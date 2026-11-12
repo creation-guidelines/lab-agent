@@ -265,6 +265,8 @@ pub fn take_in(
     }
     let entries = kept.entries()?;
     let known: HashSet<&str> = standing(&entries).into_iter().map(|s| s.job).collect();
+    // read everything new first, then write it down in the order it was asked: first asked, first started
+    let mut new = Vec::new();
     for job in remote.asked()? {
         if known.contains(job.as_str()) || passed_over.contains(&job) {
             continue;
@@ -279,6 +281,10 @@ pub fn take_in(
             }
             Err(trouble) => return Err(trouble),
         };
+        new.push((job, asking));
+    }
+    new.sort_by_key(|(_, asking)| asking.asked);
+    for (job, asking) in new {
         let jobs = folder.join("jobs");
         std::fs::create_dir_all(&jobs)
             .and_then(|()| std::fs::write(jobs.join(format!("{job}.sh")), &asking.script))
