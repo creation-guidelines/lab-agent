@@ -5,6 +5,7 @@
 mod commands;
 mod contract;
 mod processes;
+mod pulse;
 mod speaking;
 
 use argenv_resolve::*;
@@ -182,6 +183,12 @@ fn run(
     let mut passed_over = HashSet::new();
     let mut last_taken_in = 0;
     let mut short_of_budget = false;
+    let mut pulse = pulse::address().map(pulse::Pulse::new);
+    if pulse.is_some() {
+        println!(
+            "oco-agent: sending its pulse outside after each healthy turn, at most every 5 min"
+        );
+    }
     match &listen {
         Some((remote, _)) => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}, listening and speaking to {}", folder.display(), remote.repo),
         None => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}", folder.display()),
@@ -219,7 +226,13 @@ fn run(
             }
         }
         match doing.step(&mut journal, &beats, seconds()) {
-            Ok(said) => said.iter().for_each(|s| println!("{s}")),
+            Ok(said) => {
+                said.iter().for_each(|s| println!("{s}"));
+                // a healthy turn: the journal answered and the step went through
+                if let Some(trouble) = pulse.as_mut().and_then(|p| p.send(seconds())) {
+                    eprintln!("oco-agent: {trouble}");
+                }
+            }
             Err(trouble) => eprintln!("oco-agent: {}", commands::plainly(&trouble)),
         }
         if let Some((remote, _)) = &listen {
