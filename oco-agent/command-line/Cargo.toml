@@ -1,0 +1,19 @@
+[package]
+name = "oco-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "oco-agent: the commons' system for coordinating work"
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "oco-agent"
+path = "src/main.rs"
+
+[dependencies]
+oco-agent-core = { path = "../core" }
+oco-agent-journal-in-tad = { path = "../journal-in-tad" }
+argenv = "0.3"
+argenv-resolve = "0.3"
+serde = "1"

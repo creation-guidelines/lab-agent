@@ -139,8 +139,32 @@ pub enum Trouble {
     Unreachable { because: String },
 }
 
+/// What was tried, in words.
+fn tried(what: &Happened) -> &'static str {
+    match what {
+        Happened::Submitted { .. } => "asked for again",
+        Happened::Claimed { .. } => "started",
+        Happened::Finished(_) => "ended",
+        Happened::Parked(_) => "parked",
+        Happened::Released { .. } => "sent back to wait",
+        Happened::Expired => "expired",
+    }
+}
+
+/// Where a job stands, as a short sentence.
+fn as_it_stands(stands: Option<&State>) -> &'static str {
+    match stands {
+        None => "nobody has asked for it",
+        Some(State::Waiting { .. }) => "it is waiting",
+        Some(State::Running { .. }) => "it is running",
+        Some(State::Finished(_)) => "it has finished",
+        Some(State::Parked(_)) => "it is parked",
+        Some(State::Expired) => "it has expired",
+    }
+}
+
 /// Says no to an entry that may not follow what is written - the one rule every journal applies
-/// before it writes, wherever it is kept.
+/// before it writes, wherever it is kept - and says why in words anyone can read.
 pub fn refuse_unless_it_may_follow(entries: &[Entry], entry: &Entry) -> Result<(), Trouble> {
     let stands = state(entries, &entry.job);
     if may_follow(stands.as_ref(), &entry.what) {
@@ -148,7 +172,11 @@ pub fn refuse_unless_it_may_follow(entries: &[Entry], entry: &Entry) -> Result<(
     } else {
         Err(Trouble::Refused {
             job: entry.job.clone(),
-            because: format!("{:?} cannot follow {:?}", entry.what, stands),
+            because: format!(
+                "it cannot be {}: {}",
+                tried(&entry.what),
+                as_it_stands(stands.as_ref())
+            ),
         })
     }
 }
