@@ -1,0 +1,4 @@
+# swap FILE OLD NEW - in FILE, replace the exact text held in the file OLD with the text held in the
+# file NEW, once; fails if OLD's text is not there. No patterns, no escaping.
+set -eu
+OLD="$2" NEW="$3" perl -0777 -i -pe 'BEGIN { local $/; open my $a, "<", $ENV{OLD} or die "no $ENV{OLD}\n"; $o = <$a>; open my $b, "<", $ENV{NEW} or die "no $ENV{NEW}\n"; $n = <$b>; $o =~ s/\n\z//; $n =~ s/\n\z// } my $i = index($_, $o); die "swap: the text is not in $ARGV\n" if $i < 0; substr($_, $i, length $o) = $n' "$1"
