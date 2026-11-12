@@ -38,3 +38,4 @@
 {"id":"g-20261112-130606","at":"2026-11-12T13:06:06Z","by":"lab-agent-session","kind":"fix","summary":"the glimpses' links to milestones name the table"}
 {"id":"g-20261112-132651","at":"2026-11-12T13:26:51Z","by":"lab-agent-session","kind":"docs","summary":"decisions that refine others say so as a relation","touches":"decisions:2026-11-12-ports-names-and-tables decisions:2026-11-12-the-watcher-moves decisions:2026-11-12-each-driver-its-lease"}
 {"id":"g-20261112-183305","at":"2026-11-12T18:33:05Z","by":"claude","kind":"docs","summary":"the lab's problems raised: in view until each has a countermeasure"}
+{"id":"g-20261112-185347","at":"2026-11-12T18:53:47Z","by":"claude","kind":"docs","summary":"the token rotated, sealed on its way; the old kept until revoked"}
