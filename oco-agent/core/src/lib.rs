@@ -8,6 +8,7 @@
 //! no record of its own life, so a hundred finished jobs ran again.
 
 pub mod deciding;
+pub mod doing;
 pub mod journal;
 pub mod leases;
 pub mod measure;

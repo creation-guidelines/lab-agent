@@ -11,8 +11,9 @@ proven and takes over (then this repository takes its name). The design, and why
   with text tools, and ask in SQL. Held to the same measure as the journal kept in memory.
 - [`replay/`](replay/) - what oco-agent would have done: an old agent's log, answered start by start. Run over the
   log of 2026-11-11, it is the proof that the incident cannot happen here.
-- [`command-line/`](command-line/) - the program a driver types: `oco-agent beat | submit | release | standing | next`,
-  its command line declared once with argenv. Today it speaks a driver's side; it does not yet run jobs.
+- [`command-line/`](command-line/) - the program a driver types: `oco-agent beat | submit | release | standing | next | run`,
+  its command line declared once with argenv. `run` does the work through the processes on this machine:
+  a job is claimed before it starts, every process it starts carries its mark and ends with it.
 - [`shadow/`](shadow/) - the shadow run: every ten minutes a timer on the lab feeds lab-agent's newest log lines
   through oco-agent's rules and alerts urgently if lab-agent started work oco-agent would have refused. It
   decides; it never acts. Installed with `oco-agent/shadow/install`.

@@ -3,9 +3,10 @@
 
 use oco_agent_core::deciding::{next, Act};
 use oco_agent_core::journal::{
-    standing, Entry, Happened, Journal, Moment, Outcome, State, Trouble,
+    standing, state, Entry, Happened, Journal, Moment, Outcome, State, Trouble,
 };
 use oco_agent_core::leases::{Beats, Leases};
+use std::path::Path;
 
 /// A span of seconds, the way a person says it.
 fn span(seconds: u64) -> String {
@@ -37,6 +38,31 @@ pub fn plainly(trouble: &Trouble) -> String {
     }
 }
 
+/// A job's name becomes a file's name, so it holds only what is safe in one.
+fn a_safe_name(job: &str) -> Result<(), Trouble> {
+    let fine = !job.is_empty()
+        && job.len() <= 100
+        && !job.starts_with('.')
+        && job
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+    if fine {
+        Ok(())
+    } else {
+        Err(Trouble::Refused { job: job.into(), because: "a job's name may hold only letters, digits, '-', '_' and '.', and not begin with '.'".into() })
+    }
+}
+
+/// What a driver asks for.
+pub struct Request<'a> {
+    pub job: &'a str,
+    pub who: &'a str,
+    pub start_within: u64,
+    pub may_run: u64,
+    /// The script the job runs; kept as jobs/JOB.sh in the folder.
+    pub script: Option<&'a str>,
+}
+
 pub fn beat(kept: &mut impl Beats, who: &str, now: Moment) -> Result<String, Trouble> {
     kept.beat(who, now)?;
     Ok(format!("{who} is here\n"))
@@ -44,23 +70,38 @@ pub fn beat(kept: &mut impl Beats, who: &str, now: Moment) -> Result<String, Tro
 
 pub fn submit(
     kept: &mut (impl Journal + Beats),
-    job: &str,
-    who: &str,
+    folder: &Path,
+    r: &Request,
     now: Moment,
-    start_within: u64,
 ) -> Result<String, Trouble> {
-    kept.beat(who, now)?;
+    a_safe_name(r.job)?;
+    kept.beat(r.who, now)?;
+    // the script is kept only for a job never asked for, so an old job's script is never overwritten
+    if state(&kept.entries()?, r.job).is_none() {
+        if let Some(script) = r.script {
+            let jobs = folder.join("jobs");
+            std::fs::create_dir_all(&jobs)
+                .and_then(|()| std::fs::write(jobs.join(format!("{}.sh", r.job)), script))
+                .map_err(|e| Trouble::Unreachable {
+                    because: e.to_string(),
+                })?;
+        }
+    }
     kept.record(Entry {
-        job: job.into(),
+        job: r.job.into(),
         at: now,
         what: Happened::Submitted {
-            by: who.into(),
-            start_by: now + start_within,
+            by: r.who.into(),
+            start_by: now + r.start_within,
+            may_run: r.may_run,
         },
     })?;
     Ok(format!(
-        "{job}: asked for by {who}; it starts within {} or not at all\n",
-        span(start_within)
+        "{}: asked for by {}; it starts within {} or not at all, and may run for {}\n",
+        r.job,
+        r.who,
+        span(r.start_within),
+        span(r.may_run)
     ))
 }
 
@@ -159,51 +200,62 @@ pub fn what_next(
 mod tests {
     use super::*;
     use oco_agent_journal_in_tad::InTad;
+    use std::path::PathBuf;
 
-    fn kept(name: &str) -> InTad {
+    fn folder(name: &str) -> PathBuf {
         let folder =
             std::env::temp_dir().join(format!("oco-agent-commands-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
-        InTad::open(folder).unwrap()
+        folder
+    }
+
+    fn ask<'a>(job: &'a str, who: &'a str, start_within: u64) -> Request<'a> {
+        Request {
+            job,
+            who,
+            start_within,
+            may_run: 1800,
+            script: None,
+        }
     }
 
     #[test]
     fn asking_is_a_beat_and_the_job_would_start() {
-        let mut k = kept("asking");
-        assert_eq!(
-            submit(&mut k, "land the docs", "ann", 100, 3600).unwrap(),
-            "land the docs: asked for by ann; it starts within 60 min or not at all\n"
-        );
+        let f = folder("asking");
+        let mut k = InTad::open(&f).unwrap();
+        assert_eq!(submit(&mut k, &f, &ask("land-the-docs", "ann", 3600), 100).unwrap(), "land-the-docs: asked for by ann; it starts within 60 min or not at all, and may run for 30 min\n");
         assert_eq!(
             what_next(&k, 101, 1, 1, 600).unwrap(),
-            "would start land the docs\n"
+            "would start land-the-docs\n"
         );
         assert_eq!(
             where_things_stand(&k, 160, 600).unwrap(),
-            "land the docs  (ann)  waiting\nann is here (heard 60 s ago)\n"
+            "land-the-docs  (ann)  waiting\nann is here (heard 60 s ago)\n"
         );
     }
 
     #[test]
     fn a_silent_drivers_job_waits_and_says_why() {
-        let mut k = kept("silent");
-        submit(&mut k, "roll out", "bo", 0, 7200).unwrap();
+        let f = folder("silent");
+        let mut k = InTad::open(&f).unwrap();
+        submit(&mut k, &f, &ask("roll-out", "bo", 7200), 0).unwrap();
         assert_eq!(
             what_next(&k, 1500, 1, 1, 600).unwrap(),
-            "roll out waits: its driver, bo, is silent for 25 min\n"
+            "roll-out waits: its driver, bo, is silent for 25 min\n"
         );
         beat(&mut k, "bo", 1501).unwrap();
         assert_eq!(
             what_next(&k, 1502, 1, 1, 600).unwrap(),
-            "would start roll out\n"
+            "would start roll-out\n"
         );
     }
 
     #[test]
     fn what_cannot_be_done_is_said_plainly() {
-        let mut k = kept("plainly");
-        submit(&mut k, "once", "ann", 0, 3600).unwrap();
-        let again = submit(&mut k, "once", "ann", 1, 3600).unwrap_err();
+        let f = folder("plainly");
+        let mut k = InTad::open(&f).unwrap();
+        submit(&mut k, &f, &ask("once", "ann", 3600), 0).unwrap();
+        let again = submit(&mut k, &f, &ask("once", "ann", 3600), 1).unwrap_err();
         assert_eq!(
             plainly(&again),
             "once: it cannot be asked for again: it is waiting"
@@ -212,9 +264,64 @@ mod tests {
             release(&mut k, "once", "ann", 2, 3600).is_err(),
             "only a parked job is sent back"
         );
+        let e = folder("empty");
         assert_eq!(
-            what_next(&kept("empty"), 0, 1, 1, 600).unwrap(),
+            what_next(&InTad::open(&e).unwrap(), 0, 1, 1, 600).unwrap(),
             "nothing to do\n"
+        );
+    }
+
+    #[test]
+    fn a_name_that_is_not_safe_as_a_file_name_is_refused_and_nothing_is_written() {
+        let f = folder("names");
+        let mut k = InTad::open(&f).unwrap();
+        for bad in ["../escape", "a/b", ".hidden", "with space", ""] {
+            let e = submit(
+                &mut k,
+                &f,
+                &Request {
+                    script: Some("echo no"),
+                    ..ask(bad, "ann", 60)
+                },
+                0,
+            )
+            .unwrap_err();
+            assert!(
+                plainly(&e).contains("may hold only"),
+                "{bad}: {}",
+                plainly(&e)
+            );
+        }
+        assert!(!f.join("jobs").exists() && !f.parent().unwrap().join("escape.sh").exists());
+    }
+
+    #[test]
+    fn a_second_asking_does_not_overwrite_the_first_ones_script() {
+        let f = folder("script");
+        let mut k = InTad::open(&f).unwrap();
+        submit(
+            &mut k,
+            &f,
+            &Request {
+                script: Some("echo first"),
+                ..ask("once", "ann", 60)
+            },
+            0,
+        )
+        .unwrap();
+        assert!(submit(
+            &mut k,
+            &f,
+            &Request {
+                script: Some("echo second"),
+                ..ask("once", "ann", 60)
+            },
+            1
+        )
+        .is_err());
+        assert_eq!(
+            std::fs::read_to_string(f.join("jobs/once.sh")).unwrap(),
+            "echo first"
         );
     }
 }
