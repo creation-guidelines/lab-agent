@@ -80,16 +80,32 @@ pub fn state(entries: &[Entry], job: &str) -> Option<State> {
         .map(|e| after(&e.what))
 }
 
+/// Where one job stands, and which driver asked for it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Standing<'a> {
+    pub job: &'a str,
+    pub by: &'a str,
+    pub stands: State,
+}
+
 /// Where every job stands, in the order they were first submitted - the journal read once.
-pub fn standing(entries: &[Entry]) -> Vec<(&str, State)> {
-    let mut order: Vec<(&str, State)> = Vec::new();
+pub fn standing(entries: &[Entry]) -> Vec<Standing<'_>> {
+    let mut order: Vec<Standing> = Vec::new();
     let mut place: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for e in entries {
         match place.get(e.job.as_str()) {
-            Some(&i) => order[i].1 = after(&e.what),
+            Some(&i) => order[i].stands = after(&e.what),
             None => {
+                let by = match &e.what {
+                    Happened::Submitted { by, .. } => by.as_str(),
+                    _ => "",
+                };
                 place.insert(&e.job, order.len());
-                order.push((&e.job, after(&e.what)));
+                order.push(Standing {
+                    job: &e.job,
+                    by,
+                    stands: after(&e.what),
+                });
             }
         }
     }

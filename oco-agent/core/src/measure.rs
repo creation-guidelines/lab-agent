@@ -5,7 +5,7 @@
 
 use crate::deciding::{next, Act};
 use crate::journal::{state, Entry, Happened, Journal, Moment, Outcome, State, Why};
-use crate::leases::Lease;
+use crate::leases::{Beats, Leases};
 
 const MINUTE: Moment = 60;
 const HOUR: Moment = 60 * MINUTE;
@@ -37,10 +37,10 @@ fn stands(journal: &impl Journal, job: &str) -> Option<State> {
     state(&journal.entries().expect("the journal answers"), job)
 }
 
-/// The driver beat at `at`, and a beat lasts ten minutes.
-fn heard(at: Moment) -> Lease {
-    Lease {
-        last_beat: Some(at),
+/// "a driver" - who submits every job in these checks unless said otherwise - beat at `at`; a beat lasts ten minutes.
+fn heard(at: Moment) -> Leases {
+    Leases {
+        heard: [("a driver".to_string(), at)].into(),
         lasts: 10 * MINUTE,
     }
 }
@@ -48,7 +48,7 @@ fn heard(at: Moment) -> Lease {
 /// Does what `next` says, as the agent would; returns the jobs it started.
 fn carry_out(
     journal: &mut impl Journal,
-    driver: &Lease,
+    drivers: &Leases,
     now: Moment,
     run: u64,
     at_once: usize,
@@ -56,7 +56,7 @@ fn carry_out(
     let mut started = Vec::new();
     for act in next(
         &journal.entries().expect("the journal answers"),
-        driver,
+        drivers,
         now,
         run,
         at_once,
@@ -156,8 +156,8 @@ pub fn a_silent_driver_starts_nothing_and_a_returning_one_carries_on(journal: &m
     assert!(
         carry_out(
             journal,
-            &Lease {
-                last_beat: None,
+            &Leases {
+                heard: Default::default(),
                 lasts: 10 * MINUTE
             },
             1,
@@ -316,4 +316,60 @@ pub fn it_gives_back_what_it_was_given(journal: &mut impl Journal) {
         journal.record(e.clone()).expect("each may follow the last");
     }
     assert_eq!(journal.entries().expect("the journal answers"), entries);
+}
+
+/// Two drivers ask for work; only one of them is still there.
+pub fn a_job_waits_for_its_own_driver(journal: &mut impl Journal) {
+    for (job, by) in [("ann's", "ann"), ("bo's", "bo")] {
+        journal
+            .record(Entry {
+                job: job.into(),
+                at: 0,
+                what: Happened::Submitted {
+                    by: by.into(),
+                    start_by: HOUR,
+                },
+            })
+            .expect("a new job is taken");
+    }
+    let only_ann = Leases {
+        heard: [("ann".to_string(), 5)].into(),
+        lasts: 10 * MINUTE,
+    };
+    assert_eq!(
+        carry_out(journal, &only_ann, 5, 1, 5),
+        vec!["ann's"],
+        "bo is silent: bo's job waits, ann's runs"
+    );
+    let both = Leases {
+        heard: [("ann".to_string(), 6), ("bo".to_string(), 6)].into(),
+        lasts: 10 * MINUTE,
+    };
+    assert_eq!(
+        carry_out(journal, &both, 6, 1, 5),
+        vec!["bo's"],
+        "bo is back: bo's job runs"
+    );
+}
+
+/// What is known of each driver is the latest beat, and it never goes back.
+pub fn beats_are_remembered_and_never_go_back(beats: &mut impl Beats) {
+    assert!(
+        beats.heard().expect("the beats answer").is_empty(),
+        "nobody has been heard yet"
+    );
+    beats.beat("ann", 10).expect("a beat is taken");
+    beats.beat("bo", 7).expect("a beat is taken");
+    beats.beat("ann", 4).expect("an old beat is not an error");
+    let heard = beats.heard().expect("the beats answer");
+    assert_eq!(
+        (heard.get("ann"), heard.get("bo")),
+        (Some(&10), Some(&7)),
+        "an older beat does not replace a newer one"
+    );
+    beats.beat("ann", 11).expect("a beat is taken");
+    assert_eq!(
+        beats.heard().expect("the beats answer").get("ann"),
+        Some(&11)
+    );
 }

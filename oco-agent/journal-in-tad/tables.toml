@@ -15,3 +15,11 @@ fields = [
     { name = "outcome", type = "string", enum = ["done", "failed", "timed-out"] },
     { name = "why", type = "string", enum = ["the-agent-restarted"] },
 ]
+
+# When each driver was last heard from: what is known now, not a history - one row per driver.
+[tables.beats]
+key = ["driver"]
+fields = [
+    { name = "driver", type = "string", required = true },
+    { name = "at", type = "integer", required = true },
+]
