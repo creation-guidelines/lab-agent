@@ -59,23 +59,25 @@ pub enum State {
     Expired,
 }
 
+fn after(what: &Happened) -> State {
+    match what {
+        Happened::Submitted { start_by, .. } | Happened::Released { start_by } => State::Waiting {
+            start_by: *start_by,
+        },
+        Happened::Claimed { run } => State::Running { run: *run },
+        Happened::Finished(outcome) => State::Finished(*outcome),
+        Happened::Parked(why) => State::Parked(*why),
+        Happened::Expired => State::Expired,
+    }
+}
+
 /// Where `job` stands; nothing, if the journal has never heard of it.
 pub fn state(entries: &[Entry], job: &str) -> Option<State> {
     entries
         .iter()
         .rev()
         .find(|e| e.job == job)
-        .map(|e| match &e.what {
-            Happened::Submitted { start_by, .. } | Happened::Released { start_by } => {
-                State::Waiting {
-                    start_by: *start_by,
-                }
-            }
-            Happened::Claimed { run } => State::Running { run: *run },
-            Happened::Finished(outcome) => State::Finished(*outcome),
-            Happened::Parked(why) => State::Parked(*why),
-            Happened::Expired => State::Expired,
-        })
+        .map(|e| after(&e.what))
 }
 
 /// Where every job stands, in the order they were first submitted - the journal read once.
@@ -83,22 +85,11 @@ pub fn standing(entries: &[Entry]) -> Vec<(&str, State)> {
     let mut order: Vec<(&str, State)> = Vec::new();
     let mut place: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for e in entries {
-        let stands = match &e.what {
-            Happened::Submitted { start_by, .. } | Happened::Released { start_by } => {
-                State::Waiting {
-                    start_by: *start_by,
-                }
-            }
-            Happened::Claimed { run } => State::Running { run: *run },
-            Happened::Finished(outcome) => State::Finished(*outcome),
-            Happened::Parked(why) => State::Parked(*why),
-            Happened::Expired => State::Expired,
-        };
         match place.get(e.job.as_str()) {
-            Some(&i) => order[i].1 = stands,
+            Some(&i) => order[i].1 = after(&e.what),
             None => {
                 place.insert(&e.job, order.len());
-                order.push((&e.job, stands));
+                order.push((&e.job, after(&e.what)));
             }
         }
     }
@@ -123,37 +114,47 @@ pub fn may_follow(stands: Option<&State>, what: &Happened) -> bool {
     )
 }
 
-/// An entry the journal would not take, and why.
+/// Why the journal would not take an entry, or could not answer at all.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Refused {
-    pub job: String,
-    pub because: String,
+pub enum Trouble {
+    /// The entry may not follow what is already written for its job.
+    Refused { job: String, because: String },
+    /// Wherever the journal is kept could not be read or written.
+    Unreachable { because: String },
+}
+
+/// Says no to an entry that may not follow what is written - the one rule every journal applies
+/// before it writes, wherever it is kept.
+pub fn refuse_unless_it_may_follow(entries: &[Entry], entry: &Entry) -> Result<(), Trouble> {
+    let stands = state(entries, &entry.job);
+    if may_follow(stands.as_ref(), &entry.what) {
+        Ok(())
+    } else {
+        Err(Trouble::Refused {
+            job: entry.job.clone(),
+            because: format!("{:?} cannot follow {:?}", entry.what, stands),
+        })
+    }
 }
 
 /// Where the journal is kept. Whatever keeps it writes an entry only if it may follow what is already
-/// there - that one rule is what lets two agents reach for the same job and only one take it.
+/// there, one writer at a time - that is what lets two agents reach for the same job and only one take it.
 pub trait Journal {
-    fn entries(&self) -> Vec<Entry>;
-    fn record(&mut self, entry: Entry) -> Result<(), Refused>;
+    fn entries(&self) -> Result<Vec<Entry>, Trouble>;
+    fn record(&mut self, entry: Entry) -> Result<(), Trouble>;
 }
 
-/// A journal kept in memory: for trying the rules, and the measure every real one must match.
+/// A journal kept in memory: for trying the rules, and the plainest thing that passes the measure.
 #[derive(Default)]
 pub struct InMemory(Vec<Entry>);
 
 impl Journal for InMemory {
-    fn entries(&self) -> Vec<Entry> {
-        self.0.clone()
+    fn entries(&self) -> Result<Vec<Entry>, Trouble> {
+        Ok(self.0.clone())
     }
 
-    fn record(&mut self, entry: Entry) -> Result<(), Refused> {
-        let stands = state(&self.0, &entry.job);
-        if !may_follow(stands.as_ref(), &entry.what) {
-            return Err(Refused {
-                job: entry.job,
-                because: format!("{:?} cannot follow {:?}", entry.what, stands),
-            });
-        }
+    fn record(&mut self, entry: Entry) -> Result<(), Trouble> {
+        refuse_unless_it_may_follow(&self.0, &entry)?;
         self.0.push(entry);
         Ok(())
     }

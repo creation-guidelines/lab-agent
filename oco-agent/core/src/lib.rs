@@ -10,3 +10,4 @@
 pub mod deciding;
 pub mod journal;
 pub mod leases;
+pub mod measure;
