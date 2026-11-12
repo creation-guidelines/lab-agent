@@ -16,3 +16,6 @@ proven and takes over (then this repository takes its name). The design, and why
 - [`shadow/`](shadow/) - the shadow run: every ten minutes a timer on the lab feeds lab-agent's newest log lines
   through oco-agent's rules and alerts urgently if lab-agent started work oco-agent would have refused. It
   decides; it never acts. Installed with `oco-agent/shadow/install`.
+- [`watcher/`](watcher/) - the watcher outside the machine: a workflow in the jobs repository asks the lab a tiny
+  probe every half hour and alerts the urgent channel itself if the lab has not answered for 45 minutes -
+  an alert path that does not go through the lab. Installed with `oco-agent/watcher/install OWNER/JOBS-REPO`.

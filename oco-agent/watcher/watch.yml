@@ -1,0 +1,90 @@
+name: watch the lab
+# The watcher outside the machine (source: oco-agent/watcher in creation-guidelines/lab-agent). Every
+# quarter hour it checks that the lab answered its last probe - a tiny job that writes "answered" back
+# here - and asks a new one every half hour. If the lab has not answered for too long, it alerts the
+# urgent channel itself, not through the lab, which may be what failed. It never piles up probes while
+# the lab is silent: a recovering agent would run them all at once.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Minutes without an answer before alerting"
+        default: "45"
+      every:
+        description: "Minutes between probes"
+        default: "30"
+      test:
+        description: "Mark any message as a test"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: watch-the-lab
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the last probe, alert if the lab is silent, ask a new one
+        env:
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NTFY_URGENT_TOPIC: ${{ secrets.NTFY_URGENT_TOPIC }}
+          NTFY_INFO_TOPIC: ${{ secrets.NTFY_INFO_TOPIC }}
+          LIMIT: ${{ inputs.limit || '45' }}
+          EVERY: ${{ inputs.every || '30' }}
+          TEST: ${{ inputs.test && 'TEST, nothing to do - ' || '' }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          now=$(date +%s)
+          mkdir -p probes jobs
+          field() { if [ -f "probes/$1" ]; then jq -r ".$2 // empty" "probes/$1"; fi; }
+          asked=$(field asked.json probe); asked_at=$(field asked.json asked_at)
+          answered=$(field answered.json probe); answered_at=$(field answered.json answered_at)
+          state=$(cat probes/state 2>/dev/null || echo listening)
+          say() { curl -fsS -H "Title: $1" -H "Priority: $2" -d "$3" "$NTFY_SERVER/$4" >/dev/null; }
+          changed=no
+          if [ -n "$asked" ] && [ "$asked" != "$answered" ]; then
+            silent=$(( (now - asked_at) / 60 ))
+            echo "the lab has not answered $asked for $silent min"
+            if [ "$silent" -ge "$LIMIT" ] && [ "$state" != alerted ]; then
+              say "${TEST}the lab is silent" urgent "The lab has not answered the watcher's probe for $silent min ($asked). Its agent, the machine or its network may have stopped. Look at the lab." "$NTFY_URGENT_TOPIC"
+              echo alerted > probes/state; changed=yes
+              echo "alerted the urgent channel"
+            fi
+          else
+            [ -n "$answered" ] && echo "the lab answered $answered after $(( answered_at - asked_at )) s"
+            if [ "$state" = alerted ]; then
+              say "${TEST}the lab answers again" default "The lab answered the watcher's probe $answered." "$NTFY_INFO_TOPIC"
+              echo listening > probes/state; changed=yes
+              echo "told the info channel the lab is back"
+            fi
+            if [ -z "$asked_at" ] || [ $(( (now - asked_at) / 60 )) -ge "$EVERY" ]; then
+              id="$now-probe"
+              cat > "jobs/$id.sh" <<PROBE
+          #!/bin/sh
+          # A probe from the watcher outside the machine (oco-agent/watcher): answering proves the lab takes work.
+          set -eu
+          export GH_TOKEN="\$(cat "\$HOME/.config/lab-agent/token")"
+          sha=\$(gh api "repos/$REPO/contents/probes/answered.json" -q .sha 2>/dev/null || true)
+          gh api -X PUT "repos/$REPO/contents/probes/answered.json" -f message="probe answered: $id" -f content="\$(printf '{"probe":"$id","answered_at":%s}\n' "\$(date +%s)" | base64 -w0)" \${sha:+-f sha="\$sha"} >/dev/null
+          echo "answered $id"
+          PROBE
+              sed -i 's/^          //' "jobs/$id.sh"
+              printf '{"probe":"%s","asked_at":%s}\n' "$id" "$now" > probes/asked.json
+              changed=yes
+              echo "asked $id"
+            fi
+          fi
+          if [ "$changed" = yes ]; then
+            git config user.name "the lab's watcher"
+            git config user.email "watcher@users.noreply.github.com"
+            git add probes jobs
+            git commit -qm "watcher: ${asked:-first probe} - $(cat probes/state 2>/dev/null || echo listening)"
+            for try in 1 2 3; do git push -q && break; git pull -q --rebase; done
+          fi
