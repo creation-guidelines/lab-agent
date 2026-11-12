@@ -1,0 +1,12 @@
+[package]
+name = "oco-agent-replay"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "What oco-agent would have done: an old agent's log, answered start by start"
+license = "MIT"
+publish = false
+
+[dependencies]
+oco-agent-core = { path = "../core" }
+oco-agent-journal-in-tad = { path = "../journal-in-tad" }

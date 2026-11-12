@@ -9,3 +9,5 @@ proven and takes over (then this repository takes its name). The design, and why
   was broken on 2026-11-11, on purpose).
 - [`journal-in-tad/`](journal-in-tad/) - the journal kept in tad tables: a folder you can read and diff, reshape
   with text tools, and ask in SQL. Held to the same measure as the journal kept in memory.
+- [`replay/`](replay/) - what oco-agent would have done: an old agent's log, answered start by start. Run over the
+  log of 2026-11-11, it is the proof that the incident cannot happen here.
