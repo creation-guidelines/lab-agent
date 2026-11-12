@@ -12,3 +12,4 @@ pub mod doing;
 pub mod journal;
 pub mod leases;
 pub mod measure;
+pub mod saying;

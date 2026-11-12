@@ -855,6 +855,8 @@ dependencies = [
  "oco-agent-github",
  "oco-agent-journal-in-tad",
  "serde",
+ "serde_json",
+ "toml",
  "ureq",
 ]
 

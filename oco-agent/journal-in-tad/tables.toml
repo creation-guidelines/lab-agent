@@ -24,3 +24,16 @@ fields = [
     { name = "driver", type = "string", required = true },
     { name = "at", type = "integer", required = true },
 ]
+
+# What drivers said to one another, in order; told_at is when it was carried to whom it was said.
+[tables.said]
+key = ["place"]
+fields = [
+    { name = "place", type = "integer", required = true, minimum = 1.0 },
+    { name = "from", type = "string", required = true },
+    { name = "to", type = "string", required = true },
+    { name = "at", type = "integer", required = true },
+    { name = "text", type = "string", required = true },
+    { name = "urgent", type = "boolean" },
+    { name = "told_at", type = "integer" },
+]
