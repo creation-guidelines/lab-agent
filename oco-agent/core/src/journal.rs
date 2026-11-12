@@ -78,15 +78,31 @@ pub fn state(entries: &[Entry], job: &str) -> Option<State> {
         })
 }
 
-/// Every job the journal knows, in the order they were first submitted.
-pub fn jobs(entries: &[Entry]) -> Vec<&str> {
-    let mut seen: Vec<&str> = Vec::new();
+/// Where every job stands, in the order they were first submitted - the journal read once.
+pub fn standing(entries: &[Entry]) -> Vec<(&str, State)> {
+    let mut order: Vec<(&str, State)> = Vec::new();
+    let mut place: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for e in entries {
-        if !seen.contains(&e.job.as_str()) {
-            seen.push(&e.job);
+        let stands = match &e.what {
+            Happened::Submitted { start_by, .. } | Happened::Released { start_by } => {
+                State::Waiting {
+                    start_by: *start_by,
+                }
+            }
+            Happened::Claimed { run } => State::Running { run: *run },
+            Happened::Finished(outcome) => State::Finished(*outcome),
+            Happened::Parked(why) => State::Parked(*why),
+            Happened::Expired => State::Expired,
+        };
+        match place.get(e.job.as_str()) {
+            Some(&i) => order[i].1 = stands,
+            None => {
+                place.insert(&e.job, order.len());
+                order.push((&e.job, stands));
+            }
         }
     }
-    seen
+    order
 }
 
 /// Whether `what` may be written after where a job stands. This is where "run once" lives: a job is
