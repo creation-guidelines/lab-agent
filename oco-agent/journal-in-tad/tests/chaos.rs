@@ -122,3 +122,19 @@ fn a_writer_that_died_holding_its_turn_does_not_block_the_journal() {
         })
         .is_ok());
 }
+
+#[test]
+fn a_job_waits_for_its_own_driver() {
+    measure::a_job_waits_for_its_own_driver(&mut fresh("own-driver"));
+}
+
+#[test]
+fn beats_are_remembered_and_never_go_back() {
+    let at = folder("beats");
+    measure::beats_are_remembered_and_never_go_back(&mut InTad::open(&at).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(at.join("data/beats.json")).unwrap(),
+        "{\"driver\":\"ann\",\"at\":11}\n{\"driver\":\"bo\",\"at\":7}\n",
+        "one line per driver, the latest beat"
+    );
+}

@@ -1,11 +1,13 @@
 //! The journal kept in tad tables: one row per entry in `data/journal.json`, declared in the
-//! `tables.toml` beside it. The folder is an ordinary tad dataset - files you can read and diff, text
+//! `tables.toml` beside it - and with it the drivers' beats, one row per driver in `data/beats.json`. The folder is an ordinary tad dataset - files you can read and diff, text
 //! you can reshape, a table you can ask in SQL - and it passes the checks every journal must pass.
 
 use oco_agent_core::journal::{
-    refuse_unless_it_may_follow, Entry, Happened, Journal, Outcome, Trouble, Why,
+    refuse_unless_it_may_follow, Entry, Happened, Journal, Moment, Outcome, Trouble, Why,
 };
+use oco_agent_core::leases::Beats;
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -214,6 +216,42 @@ impl Journal for InTad {
             "journal",
             &[place],
             &row_of(&entry),
+        )
+        .map_err(unreachable)?;
+        Ok(())
+    }
+}
+
+impl Beats for InTad {
+    fn heard(&self) -> Result<HashMap<String, Moment>, Trouble> {
+        let text = match std::fs::read_to_string(self.data().join("beats.json")) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(unreachable(e)),
+        };
+        let mut heard = HashMap::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str::<Value>(line) {
+                Ok(Value::Object(row)) => {
+                    heard.insert(words(&row, "driver").to_string(), whole(&row, "at")?)
+                }
+                _ => return Err(unreachable("a line of the beats is not a row")),
+            };
+        }
+        Ok(heard)
+    }
+
+    fn beat(&mut self, driver: &str, at: Moment) -> Result<(), Trouble> {
+        let _turn = Turn::take(&self.folder)?;
+        if self.heard()?.get(driver).is_some_and(|last| *last >= at) {
+            return Ok(());
+        }
+        tad::set(
+            &self.data(),
+            &self.declaration,
+            "beats",
+            &[driver.to_string()],
+            &[("at".to_string(), at.to_string())],
         )
         .map_err(unreachable)?;
         Ok(())

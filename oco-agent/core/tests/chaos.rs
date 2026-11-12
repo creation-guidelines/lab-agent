@@ -52,3 +52,15 @@ fn no_more_run_side_by_side_than_allowed() {
 fn it_gives_back_what_it_was_given() {
     measure::it_gives_back_what_it_was_given(&mut InMemory::default());
 }
+
+#[test]
+fn a_job_waits_for_its_own_driver() {
+    measure::a_job_waits_for_its_own_driver(&mut InMemory::default());
+}
+
+#[test]
+fn beats_are_remembered_and_never_go_back() {
+    measure::beats_are_remembered_and_never_go_back(
+        &mut oco_agent_core::leases::InMemory::default(),
+    );
+}

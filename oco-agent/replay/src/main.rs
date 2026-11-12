@@ -8,7 +8,7 @@
 
 use oco_agent_core::deciding::{next, Act};
 use oco_agent_core::journal::{state, Entry, Happened, InMemory, Journal, Moment, Outcome, State};
-use oco_agent_core::leases::Lease;
+use oco_agent_core::leases::Leases;
 use oco_agent_journal_in_tad::InTad;
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -58,15 +58,15 @@ fn main() {
             continue;
         };
         // the driver is taken to be present throughout: this replay asks only about running once
-        let driver = Lease {
-            last_beat: Some(now),
+        let drivers = Leases {
+            heard: [("the old log".to_string(), now)].into(),
             lasts: DAY,
         };
         if line.contains("Started lab-agent") {
             run += 1;
             for act in next(
                 &journal.entries().expect("the journal answers"),
-                &driver,
+                &drivers,
                 now,
                 run,
                 usize::MAX,
@@ -98,7 +98,7 @@ fn main() {
                     .expect("a new job is taken");
             }
             let entries = journal.entries().expect("the journal answers");
-            if next(&entries, &driver, now, run.max(1), usize::MAX)
+            if next(&entries, &drivers, now, run.max(1), usize::MAX)
                 .contains(&Act::Start(job.clone()))
             {
                 journal
