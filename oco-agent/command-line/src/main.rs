@@ -4,6 +4,7 @@
 
 mod commands;
 mod contract;
+mod ntfy;
 mod processes;
 mod pulse;
 mod speaking;
@@ -11,8 +12,9 @@ mod speaking;
 use argenv_resolve::*;
 use contract::{Command, Contract};
 use oco_agent_core::doing::Doing;
-use oco_agent_core::journal::{state, Entry, Journal, Moment, Trouble};
+use oco_agent_core::journal::{standing, state, Entry, Journal, Moment, Trouble};
 use oco_agent_core::leases::Beats;
+use oco_agent_core::saying::{carry, Said, Sayings, Voice, EVERYONE};
 use oco_agent_github::GitHub;
 use oco_agent_journal_in_tad::InTad;
 use std::collections::{HashMap, HashSet};
@@ -183,6 +185,23 @@ fn run(
     let mut passed_over = HashSet::new();
     let mut last_taken_in = 0;
     let mut short_of_budget = false;
+    let mut voice = match ntfy::Ntfy::open() {
+        Ok(voice) => voice,
+        Err(why) => {
+            eprintln!(
+                "oco-agent: the channels file cannot be read ({why}): nobody is told anything"
+            );
+            None
+        }
+    };
+    if let Some(v) = &voice {
+        println!(
+            "oco-agent: carrying what is said to those with a channel here; hearing {}",
+            v.who_answer().join(", ")
+        );
+    }
+    let mut voice_at = 0;
+    let mut heard_since: HashMap<String, String> = HashMap::new();
     let mut pulse = pulse::address().map(pulse::Pulse::new);
     if pulse.is_some() {
         println!(
@@ -240,8 +259,111 @@ fn run(
                 eprintln!("oco-agent: speaking: {}", commands::plainly(&trouble));
             }
         }
+        if let Some(v) = voice.as_mut() {
+            let now = seconds();
+            if now.saturating_sub(voice_at) >= 20 {
+                voice_at = now;
+                if let Err(trouble) = hear_and_tell(&mut journal, v, folder, &mut heard_since, now)
+                {
+                    eprintln!("oco-agent: the voice: {trouble}; it rests five minutes");
+                    // a voice that fails is not asked again at once: the server counts messages by the day
+                    voice_at = now + 280;
+                }
+            }
+        }
         std::thread::sleep(Duration::from_secs(every.max(1)));
     }
+}
+
+/// The voice's turn: what those with a topic of their own answered becomes something they said, to
+/// everyone; how each job of a driver who can be told here ended is said to them, once; and whatever
+/// was said to those this voice reaches is carried to them.
+fn hear_and_tell(
+    journal: &mut InTad,
+    voice: &mut ntfy::Ntfy,
+    folder: &Path,
+    since: &mut HashMap<String, String>,
+    now: u64,
+) -> Result<(), String> {
+    let plainly = |t: Trouble| commands::plainly(&t);
+    for driver in voice.who_answer() {
+        let mark = folder.join(format!("heard-{driver}"));
+        // the first time, only what is said from now on is heard - not the topic's past
+        let from = since
+            .entry(driver.clone())
+            .or_insert_with(|| {
+                std::fs::read_to_string(&mark)
+                    .ok()
+                    .filter(|m| !m.trim().is_empty())
+                    .unwrap_or_else(|| now.to_string())
+            })
+            .clone();
+        for h in voice.hear(&driver, from.trim())? {
+            journal
+                .say(Said {
+                    from: driver.clone(),
+                    to: EVERYONE.into(),
+                    at: h.at,
+                    text: h.text,
+                    urgent: false,
+                    told_at: Some(h.at),
+                })
+                .map_err(plainly)?;
+            let _ = std::fs::write(&mark, &h.id);
+            since.insert(driver.clone(), h.id);
+        }
+    }
+    let (entries, said) = (
+        journal.entries().map_err(plainly)?,
+        journal.said().map_err(plainly)?,
+    );
+    for s in standing(&entries) {
+        let Some((how, _)) = commands::ending(&s.stands) else {
+            continue;
+        };
+        let about = format!("{} ", s.job);
+        if !voice.reaches(s.by)
+            || said
+                .iter()
+                .any(|x| x.from == "oco-agent" && x.text.starts_with(&about))
+        {
+            continue;
+        }
+        let log = log_of(s.job, folder, None).unwrap_or_default();
+        let mut last: Vec<&str> = log
+            .lines()
+            .rev()
+            .filter(|l| !l.trim().is_empty())
+            .take(6)
+            .collect();
+        last.reverse();
+        let text = if last.is_empty() {
+            format!("{about}{how}")
+        } else {
+            format!("{about}{how}\n\n{}", last.join("\n"))
+        };
+        journal
+            .say(Said {
+                from: "oco-agent".into(),
+                to: s.by.into(),
+                at: now,
+                text,
+                urgent: how != "finished",
+                told_at: None,
+            })
+            .map_err(plainly)?;
+    }
+    carry(journal, voice, now).map_err(plainly)?;
+    let left = journal
+        .said()
+        .map_err(plainly)?
+        .iter()
+        .filter(|x| x.told_at.is_none() && voice.reaches(&x.to))
+        .count();
+    if left > 0 {
+        return Err(format!("{left} thing(s) said could not be carried"));
+    }
+    Ok(())
 }
 
 fn main() {
@@ -386,6 +508,26 @@ fn main() {
                 Contract::RUN.get_from_or_default(&resolved).unwrap_or(1),
                 at_once,
                 lasts,
+            ),
+            Command::Say => commands::say(
+                &mut kept,
+                &who,
+                &Contract::TO
+                    .get_from_or_default(&resolved)
+                    .unwrap_or_else(|| "*".into()),
+                &Contract::TEXT
+                    .get_from_or_default(&resolved)
+                    .unwrap_or_default(),
+                Contract::URGENT
+                    .get_from_or_default(&resolved)
+                    .unwrap_or(false),
+                now,
+            ),
+            Command::Inbox => commands::inbox(
+                &kept,
+                &who,
+                Contract::AFTER.get_from_or_default(&resolved).unwrap_or(0) as usize,
+                now,
             ),
             Command::Run | Command::Log | Command::Wait => unreachable!("handled above"),
         }),

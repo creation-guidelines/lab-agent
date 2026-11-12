@@ -28,3 +28,8 @@ proven and takes over (then this repository takes its name). The design, and why
 - [`service/`](service/) - oco-agent as a service on the lab, beside lab-agent: `oco-agent/service/install OWNER/REPO`.
   It keeps the lab awake while it serves. A job never restarts the agent that runs it - that cuts the job off,
   and the new run parks it; asked from inside a job, the installer leaves the restart to systemd, ten seconds on. The switch, step by step with a way back at each: `../DESIGN.md`.
+- **Saying** - drivers say things to one another: `oco-agent say TEXT --to NAME [--urgent]`, `oco-agent inbox
+  [--after N]`. What is said is a tad table beside the journal. A driver with a channel on this machine
+  (`~/.config/oco-agent/channels.toml`, private: ntfy topics) has it carried to their phone, urgent words on
+  the urgent topic; what they answer on their own topic is heard as something they said to everyone; and how
+  each of their own jobs ended is said to them once. Only `command-line/src/ntfy.rs` knows ntfy.

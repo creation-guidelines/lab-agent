@@ -6,6 +6,7 @@ use oco_agent_core::journal::{
     standing, state, Entry, Happened, Journal, Moment, Outcome, State, Trouble,
 };
 use oco_agent_core::leases::{Beats, Leases};
+use oco_agent_core::saying::{for_whom, Said, Sayings, EVERYONE};
 use oco_agent_github::{Asking, GitHub};
 use std::collections::HashSet;
 use std::path::Path;
@@ -309,6 +310,61 @@ pub fn take_in(
     Ok(said)
 }
 
+/// Says something to another driver, or to everyone; saying is itself a beat.
+pub fn say(
+    kept: &mut (impl Sayings + Beats),
+    from: &str,
+    to: &str,
+    text: &str,
+    urgent: bool,
+    now: Moment,
+) -> Result<String, Trouble> {
+    if text.trim().is_empty() {
+        return Err(Trouble::Refused {
+            job: "say".into(),
+            because: "there is nothing to say: give the words".into(),
+        });
+    }
+    kept.beat(from, now)?;
+    kept.say(Said {
+        from: from.into(),
+        to: to.into(),
+        at: now,
+        text: text.into(),
+        urgent,
+        told_at: None,
+    })?;
+    let whom = if to == EVERYONE {
+        "everyone".to_string()
+    } else {
+        to.to_string()
+    };
+    Ok(format!(
+        "said to {whom}{}\n",
+        if urgent { ", as urgent" } else { "" }
+    ))
+}
+
+/// What `who` has yet to read after place `after`, and the place read up to.
+pub fn inbox(kept: &impl Sayings, who: &str, after: usize, now: Moment) -> Result<String, Trouble> {
+    let said = kept.said()?;
+    let mut text = String::new();
+    for (place, s) in for_whom(&said, who, after) {
+        text.push_str(&format!(
+            "{place}  {} ({} ago){}: {}\n",
+            s.from,
+            span(now.saturating_sub(s.at)),
+            if s.urgent { ", urgent" } else { "" },
+            s.text
+        ));
+    }
+    if text.is_empty() {
+        text.push_str(&format!("nothing new after {after}\n"));
+    }
+    text.push_str(&format!("read up to {}\n", said.len()));
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,6 +491,36 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(f.join("jobs/once.sh")).unwrap(),
             "echo first"
+        );
+    }
+
+    #[test]
+    fn what_is_said_is_read_by_whom_it_is_for_and_not_twice() {
+        let f = folder("saying");
+        let mut k = InTad::open(&f).unwrap();
+        assert_eq!(
+            say(&mut k, "claude", "ann", "the docs are landed", false, 100).unwrap(),
+            "said to ann\n"
+        );
+        assert_eq!(
+            say(&mut k, "ann", EVERYONE, "thank you", true, 160).unwrap(),
+            "said to everyone, as urgent\n"
+        );
+        assert_eq!(
+            inbox(&k, "claude", 0, 220).unwrap(),
+            "2  ann (60 s ago), urgent: thank you\nread up to 2\n"
+        );
+        assert_eq!(
+            inbox(&k, "claude", 2, 220).unwrap(),
+            "nothing new after 2\nread up to 2\n"
+        );
+        assert_eq!(
+            inbox(&k, "ann", 0, 220).unwrap(),
+            "1  claude (2 min ago): the docs are landed\nread up to 2\n"
+        );
+        assert!(
+            say(&mut k, "claude", "ann", "  ", false, 221).is_err(),
+            "nothing to say is not said"
         );
     }
 }

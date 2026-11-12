@@ -140,3 +140,11 @@ fn beats_are_remembered_and_never_go_back() {
         "one line per driver, the latest beat"
     );
 }
+
+#[test]
+fn sayings_are_kept_and_told_once() {
+    let at = folder("sayings");
+    measure::sayings_are_kept_and_told_once(&mut InTad::open(&at).unwrap());
+    let text = std::fs::read_to_string(at.join("data/said.json")).unwrap();
+    assert!(text.starts_with("{\"place\":1,\"from\":\"claude\",\"to\":\"ann\",\"at\":1,\"text\":\"the docs are landed\",\"urgent\":false,\"told_at\":10}\n"), "one readable line per saying: {text}");
+}
