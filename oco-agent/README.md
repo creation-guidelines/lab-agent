@@ -11,3 +11,5 @@ proven and takes over (then this repository takes its name). The design, and why
   with text tools, and ask in SQL. Held to the same measure as the journal kept in memory.
 - [`replay/`](replay/) - what oco-agent would have done: an old agent's log, answered start by start. Run over the
   log of 2026-11-11, it is the proof that the incident cannot happen here.
+- [`command-line/`](command-line/) - the program a driver types: `oco-agent beat | submit | release | standing | next`,
+  its command line declared once with argenv. Today it speaks a driver's side; it does not yet run jobs.

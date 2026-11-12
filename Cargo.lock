@@ -846,6 +846,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oco-agent"
+version = "0.1.0"
+dependencies = [
+ "argenv",
+ "argenv-resolve",
+ "oco-agent-core",
+ "oco-agent-journal-in-tad",
+ "serde",
+]
+
+[[package]]
 name = "oco-agent-core"
 version = "0.1.0"
 
