@@ -19,3 +19,7 @@ release = false
 [[package]]
 name = "oco-agent-journal-in-tad"
 release = false
+
+[[package]]
+name = "oco-agent-replay"
+release = false
