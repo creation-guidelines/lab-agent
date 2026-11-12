@@ -9,20 +9,30 @@ use base64::Engine;
 use oco_agent_core::journal::{Moment, Trouble};
 use oco_agent_core::leases::Beats;
 use serde_json::{json, Value};
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Where asked-for work lives in the repository.
 pub const ASKED: &str = "oco-agent/jobs";
 const BEAT: &str = "OCO_AGENT_BEAT_";
 const API: &str = "https://api.github.com";
 
-/// One repository, as oco-agent uses it.
+/// One repository, as oco-agent uses it. Listings are asked for conditionally: GitHub answers "not
+/// modified" without charging the budget - 5,000 requests an hour, shared by everything that uses the
+/// same account - so taking work in costs next to nothing while nothing changes.
 pub struct GitHub {
     pub repo: String,
     branch: String,
     token: String,
     agent: ureq::Agent,
+    /// Each listing's last answer, by its fingerprint (ETag).
+    known: RefCell<HashMap<String, (String, Value)>>,
+    /// How much of the hour's budget GitHub last said was left.
+    left: Cell<Option<u64>>,
+    /// Listings GitHub said do not exist, and when: not asked again for two minutes (a "not found" is
+    /// charged to the budget, and carries no fingerprint to ask conditionally with).
+    missing: RefCell<HashMap<String, Instant>>,
 }
 
 fn unreachable(because: impl std::fmt::Display) -> Trouble {
@@ -71,6 +81,9 @@ impl GitHub {
             branch: "main".into(),
             token,
             agent,
+            known: RefCell::default(),
+            left: Cell::default(),
+            missing: RefCell::default(),
         }
     }
 
@@ -82,24 +95,71 @@ impl GitHub {
             .set("X-GitHub-Api-Version", "2022-11-28")
     }
 
-    /// The names of every job asked for.
-    pub fn asked(&self) -> Result<Vec<String>, Trouble> {
-        match self
-            .call("GET", &format!("contents/{ASKED}?ref={}", self.branch))
-            .call()
+    /// How much of the hour's budget GitHub last said was left.
+    pub fn budget_left(&self) -> Option<u64> {
+        self.left.get()
+    }
+
+    fn note_budget(&self, r: &ureq::Response) {
+        if let Some(left) = r
+            .header("X-RateLimit-Remaining")
+            .and_then(|v| v.parse().ok())
         {
-            Ok(r) => {
-                let listing: Value = r.into_json().map_err(unreachable)?;
-                Ok(listing
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|f| f["name"].as_str()?.strip_suffix(".sh").map(str::to_string))
-                    .collect())
+            self.left.set(Some(left));
+        }
+    }
+
+    /// A listing, asked for only if it changed since the last answer; nothing, if there is none.
+    fn listing(&self, path: &str) -> Result<Option<Value>, Trouble> {
+        if self
+            .missing
+            .borrow()
+            .get(path)
+            .is_some_and(|since| since.elapsed() < Duration::from_secs(120))
+        {
+            return Ok(None);
+        }
+        let mut request = self.call("GET", path);
+        if let Some((etag, _)) = self.known.borrow().get(path) {
+            request = request.set("If-None-Match", etag);
+        }
+        match request.call() {
+            Ok(r) if r.status() == 304 => {
+                self.note_budget(&r);
+                Ok(self.known.borrow().get(path).map(|(_, v)| v.clone()))
             }
-            Err(ureq::Error::Status(404, _)) => Ok(Vec::new()),
+            Ok(r) => {
+                self.note_budget(&r);
+                let etag = r.header("ETag").map(str::to_string);
+                let v: Value = r.into_json().map_err(unreachable)?;
+                if let Some(etag) = etag {
+                    self.known
+                        .borrow_mut()
+                        .insert(path.to_string(), (etag, v.clone()));
+                }
+                Ok(Some(v))
+            }
+            Err(ureq::Error::Status(404, _)) => {
+                self.missing
+                    .borrow_mut()
+                    .insert(path.to_string(), Instant::now());
+                Ok(None)
+            }
             Err(e) => Err(said(e)),
         }
+    }
+
+    /// The names of every job asked for.
+    pub fn asked(&self) -> Result<Vec<String>, Trouble> {
+        let listing = self
+            .listing(&format!("contents/{ASKED}?ref={}", self.branch))?
+            .unwrap_or(Value::Null);
+        Ok(listing
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f["name"].as_str()?.strip_suffix(".sh").map(str::to_string))
+            .collect())
     }
 
     /// The job asked for as `job`.
@@ -145,12 +205,9 @@ fn beat_of(value: &str) -> Option<(String, Moment)> {
 
 impl Beats for GitHub {
     fn heard(&self) -> Result<HashMap<String, Moment>, Trouble> {
-        let listing: Value = self
-            .call("GET", "actions/variables?per_page=30")
-            .call()
-            .map_err(said)?
-            .into_json()
-            .map_err(unreachable)?;
+        let listing = self
+            .listing("actions/variables?per_page=30")?
+            .unwrap_or(Value::Null);
         Ok(listing["variables"]
             .as_array()
             .into_iter()
