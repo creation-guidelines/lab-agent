@@ -83,8 +83,21 @@ impl Hands for Processes {
         std::fs::create_dir_all(self.folder.join("logs")).map_err(|e| e.to_string())?;
         let out = std::fs::File::create(self.log(job)).map_err(|e| e.to_string())?;
         let err = out.try_clone().map_err(|e| e.to_string())?;
-        let child = Command::new("sh")
-            .arg(&script)
+        // a script that names its own interpreter (#!) is run as it asks; any other, by sh
+        let names_its_own = std::fs::read(&script)
+            .map(|b| b.starts_with(b"#!"))
+            .unwrap_or(false);
+        let mut command = if names_its_own {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| e.to_string())?;
+            Command::new(&script)
+        } else {
+            let mut sh = Command::new("sh");
+            sh.arg(&script);
+            sh
+        };
+        let child = command
             .current_dir(&work)
             .env(MARK, job)
             .stdin(Stdio::null())
@@ -114,5 +127,47 @@ impl Hands for Processes {
 
     fn clear(&mut self, job: &str) {
         end_all(job);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_to_the_end(script: &str) -> (Outcome, String) {
+        let folder = std::env::temp_dir().join(format!(
+            "oco-agent-processes-{}-{}",
+            std::process::id(),
+            script.len()
+        ));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("jobs")).unwrap();
+        let mut hands = Processes {
+            folder: folder.clone(),
+        };
+        std::fs::write(hands.script("job"), script).unwrap();
+        let mut holding = hands.start("job").unwrap();
+        let outcome = loop {
+            match hands.look(&mut holding) {
+                Some(outcome) => break outcome,
+                None => std::thread::sleep(Duration::from_millis(50)),
+            }
+        };
+        (outcome, std::fs::read_to_string(hands.log("job")).unwrap())
+    }
+
+    #[test]
+    fn a_script_that_names_its_interpreter_is_run_by_it() {
+        let (outcome, log) = run_to_the_end("#!/bin/bash\nwords=(one two three)\n[[ ${#words[@]} == 3 ]] && echo \"bash ran this: ${words[2]}\"\n");
+        assert_eq!(
+            (outcome, log.trim()),
+            (Outcome::Done, "bash ran this: three")
+        );
+    }
+
+    #[test]
+    fn a_script_that_names_none_is_run_by_sh_and_its_failure_is_seen() {
+        let (outcome, log) = run_to_the_end("echo plain\nexit 3\n");
+        assert_eq!((outcome, log.trim()), (Outcome::Failed, "plain"));
     }
 }

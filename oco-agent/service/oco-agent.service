@@ -1,0 +1,16 @@
+[Unit]
+Description=oco-agent: takes work asked through the repository, does each job once, speaks back
+# starting it again is always safe - a new run parks what the last one left and clears its processes -
+# so there is no limit on how often it may be started
+StartLimitIntervalSec=0
+
+[Service]
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+# the lab stays awake while oco-agent serves it: a sleeping lab takes no work, and looks silent to the
+# watcher outside. Stopping this service lets the machine sleep as it is set to.
+ExecStart=/usr/bin/systemd-inhibit --what=sleep --who=oco-agent "--why=oco-agent serves the lab" %h/.local/bin/oco-agent run --listen @REPO@
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

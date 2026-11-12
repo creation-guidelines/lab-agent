@@ -9,6 +9,8 @@ git_release_enable = false
 
 [[package]]
 name = "lab-agent"
+# pinned: a workspace would otherwise tag as lab-agent-vX, which the delivery (tag-prefix "v") does not see
+git_tag_name = "v{{ version }}"
 git_release_enable = true
 
 # oco-agent grows here beside lab-agent; it is not released until it takes over.
