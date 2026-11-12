@@ -433,7 +433,8 @@ mod tests {
                             base64::engine::general_purpose::STANDARD.encode(status)
                         )
                     } else {
-                        r#"[{"name":"1000-a"},{"name":"2000-b"}]"#.to_string()
+                        r#"{"truncated":false,"tree":[{"path":"1000-a"},{"path":"2000-b"}]}"#
+                            .to_string()
                     };
                     format!(
                         "HTTP/1.1 200 OK\r\nETag: \"tag\"\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

@@ -113,7 +113,12 @@ impl Client {
         Client {
             token,
             base: base.trim_end_matches('/').to_string(),
-            agent: ureq::AgentBuilder::new().build(),
+            agent: ureq::AgentBuilder::new()
+                // a request that hangs must not hold the agent for ever without a word
+                .timeout_connect(std::time::Duration::from_secs(15))
+                .timeout_read(std::time::Duration::from_secs(60))
+                .timeout_write(std::time::Duration::from_secs(60))
+                .build(),
         }
     }
 
@@ -225,7 +230,7 @@ impl Client {
         }
     }
 
-    /// [`Client::list_dir`] with an ETag from an earlier listing: when nothing changed GitHub
+    /// [`Client::list_dir`], read from the git tree (which says when it is cut short), with an ETag from an earlier listing: when nothing changed GitHub
     /// answers 304 and the request is free against the rate limit, so a daemon can poll all day
     /// without spending the budget it shares with everything else the user does on GitHub.
     pub fn list_dir_cond(
@@ -236,7 +241,7 @@ impl Client {
         r#ref: &str,
         etag: Option<&str>,
     ) -> Result<Listed> {
-        let url = self.api(&format!("/repos/{owner}/{repo}/contents/{path}?ref={ref}"));
+        let url = self.api(&format!("/repos/{owner}/{repo}/git/trees/{ref}:{path}"));
         let mut req = self.auth(self.agent.get(&url));
         if let Some(tag) = etag {
             req = req.set("If-None-Match", tag);
@@ -246,11 +251,18 @@ impl Client {
             Ok(resp) => {
                 let etag = resp.header("ETag").map(str::to_string);
                 let v: Value = resp.into_json()?;
-                let names = v
+                // the git tree, unlike the contents listing, says when it is cut short (the contents
+                // listing silently stops at 1,000 entries: the stall and the replays of 2026-11-11/12)
+                if v["truncated"].as_bool() == Some(true) {
+                    return Err(anyhow::anyhow!(
+                        "listing {owner}/{repo}:{path}@{ref} is cut short by GitHub: nothing is decided from part of it"
+                    ));
+                }
+                let names = v["tree"]
                     .as_array()
                     .map(|a| {
                         a.iter()
-                            .filter_map(|e| e["name"].as_str().map(str::to_string))
+                            .filter_map(|e| e["path"].as_str().map(str::to_string))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -399,7 +411,7 @@ mod tests {
 
     #[test]
     fn a_changed_listing_has_names_and_an_etag() {
-        let body = "[{\"name\":\"1-a.sh\"},{\"name\":\"archive\"}]";
+        let body = "{\"truncated\":false,\"tree\":[{\"path\":\"1-a.sh\"},{\"path\":\"archive\"}]}";
         let client = serve(vec![json("200 OK", body, "ETag: \"d2\"\r\n")]);
         match client
             .list_dir_cond("o", "r", "jobs", "main", None)
@@ -411,5 +423,16 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+    #[test]
+    fn a_listing_cut_short_is_an_error_not_a_partial_truth() {
+        // the stall and the replays of 2026-11-11/12: a listing that stopped at 1,000 without a word
+        let body = "{\"truncated\":true,\"tree\":[{\"path\":\"1-a.sh\"}]}";
+        let client = serve(vec![json("200 OK", body, "")]);
+        let e = client
+            .list_dir_cond("o", "r", "jobs", "main", None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("cut short"), "{e}");
     }
 }
