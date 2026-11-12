@@ -1,7 +1,7 @@
 //! What the agent does next. Given the journal, the driver's lease, the time and which run of the
 //! agent this is, it names the acts to take and takes none itself.
 
-use crate::journal::{jobs, state, Entry, Moment, State, Why};
+use crate::journal::{standing, Entry, Moment, State, Why};
 use crate::leases::Lease;
 
 /// One thing the agent should now do.
@@ -17,8 +17,8 @@ pub fn next(entries: &[Entry], driver: &Lease, now: Moment, run: u64, at_once: u
     let mut acts = Vec::new();
     let mut running = 0;
     let mut waiting = Vec::new();
-    for job in jobs(entries) {
-        match state(entries, job) {
+    for (job, stands) in standing(entries) {
+        match Some(stands) {
             // a job an earlier run was doing when the agent stopped: set aside, never started again unasked
             Some(State::Running { run: theirs }) if theirs != run => {
                 acts.push(Act::Park(job.to_string(), Why::TheAgentRestarted))
