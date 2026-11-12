@@ -199,6 +199,25 @@ pub fn what_next(
     Ok(text)
 }
 
+/// How a job ended, for a driver waiting on it: in words, and as an exit status; nothing, if it has not.
+pub fn ending(stands: &State) -> Option<(&'static str, i32)> {
+    match stands {
+        State::Finished(Outcome::Done) => Some(("finished", 0)),
+        State::Finished(Outcome::Failed) => Some(("failed", 1)),
+        State::Finished(Outcome::TimedOut) => Some(("ran out of time and was stopped", 124)),
+        State::Expired => Some(("expired: nobody started it in time", 3)),
+        State::Parked(_) => Some(("parked: the agent restarted while doing it", 4)),
+        State::Waiting { .. } | State::Running { .. } => None,
+    }
+}
+
+/// Where a job stands, in words, for one that has not ended.
+pub fn standing_in_words(stands: Option<&State>) -> String {
+    stands
+        .map(in_words)
+        .unwrap_or_else(|| "not yet taken in".into())
+}
+
 /// Asks for a job through a repository: the asking is itself a beat there.
 pub fn submit_via(remote: &mut GitHub, r: &Request, now: Moment) -> Result<String, Trouble> {
     a_safe_name(r.job)?;

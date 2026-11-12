@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 /// Where asked-for work lives in the repository.
 pub const ASKED: &str = "oco-agent/jobs";
+/// The branch what happened is written to, so the history of asking, on main, stays clean.
+pub const SPOKEN: &str = "spoken";
 const BEAT: &str = "OCO_AGENT_BEAT_";
 const API: &str = "https://api.github.com";
 
@@ -30,6 +32,12 @@ pub struct GitHub {
     known: RefCell<HashMap<String, (String, Value)>>,
     /// How much of the hour's budget GitHub last said was left.
     left: Cell<Option<u64>>,
+    /// Each spoken file's last known sha, so writing it needs no read first.
+    shas: RefCell<HashMap<String, String>>,
+    /// Each spoken file's last answer, by its fingerprint.
+    texts: RefCell<HashMap<String, (String, String)>>,
+    /// Whether the spoken branch is known to exist.
+    has_spoken: Cell<bool>,
     /// Listings GitHub said do not exist, and when: not asked again for two minutes (a "not found" is
     /// charged to the budget, and carries no fingerprint to ask conditionally with).
     missing: RefCell<HashMap<String, Instant>>,
@@ -84,6 +92,9 @@ impl GitHub {
             known: RefCell::default(),
             left: Cell::default(),
             missing: RefCell::default(),
+            shas: RefCell::default(),
+            texts: RefCell::default(),
+            has_spoken: Cell::default(),
         }
     }
 
@@ -193,6 +204,111 @@ impl GitHub {
                 job: asking.job.clone(),
                 because: "it cannot be asked for again: it was asked for already".into(),
             }),
+            Err(e) => Err(said(e)),
+        }
+    }
+    /// Makes sure the spoken branch exists, starting it from main if it does not.
+    fn spoken_branch(&self) -> Result<(), Trouble> {
+        if self.has_spoken.get() {
+            return Ok(());
+        }
+        match self.call("GET", &format!("git/ref/heads/{SPOKEN}")).call() {
+            Ok(_) => {}
+            Err(ureq::Error::Status(404, _)) => {
+                let main: Value = self
+                    .call("GET", &format!("git/ref/heads/{}", self.branch))
+                    .call()
+                    .map_err(said)?
+                    .into_json()
+                    .map_err(unreachable)?;
+                let sha = main["object"]["sha"]
+                    .as_str()
+                    .ok_or_else(|| unreachable("the main branch has no commit"))?;
+                match self
+                    .call("POST", "git/refs")
+                    .send_json(json!({ "ref": format!("refs/heads/{SPOKEN}"), "sha": sha }))
+                {
+                    Ok(_) | Err(ureq::Error::Status(422, _)) => {}
+                    Err(e) => return Err(said(e)),
+                }
+            }
+            Err(e) => return Err(said(e)),
+        }
+        self.has_spoken.set(true);
+        Ok(())
+    }
+
+    fn sha_of(&self, path: &str) -> Result<Option<String>, Trouble> {
+        match self
+            .call("GET", &format!("contents/{path}?ref={SPOKEN}"))
+            .call()
+        {
+            Ok(r) => Ok(r.into_json::<Value>().map_err(unreachable)?["sha"]
+                .as_str()
+                .map(str::to_string)),
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(e) => Err(said(e)),
+        }
+    }
+
+    /// Writes `content` at `path` on the spoken branch: one commit.
+    pub fn speak(&self, path: &str, content: &[u8], message: &str) -> Result<(), Trouble> {
+        self.spoken_branch()?;
+        for attempt in 0..2 {
+            let known = self.shas.borrow().get(path).cloned();
+            let sha = match known {
+                Some(sha) if attempt == 0 => Some(sha),
+                _ => self.sha_of(path)?,
+            };
+            let mut body = json!({ "message": message, "content": base64::engine::general_purpose::STANDARD.encode(content), "branch": SPOKEN });
+            if let Some(sha) = sha {
+                body["sha"] = json!(sha);
+            }
+            match self
+                .call("PUT", &format!("contents/{path}"))
+                .send_json(body)
+            {
+                Ok(r) => {
+                    let written: Value = r.into_json().map_err(unreachable)?;
+                    if let Some(sha) = written["content"]["sha"].as_str() {
+                        self.shas
+                            .borrow_mut()
+                            .insert(path.to_string(), sha.to_string());
+                    }
+                    return Ok(());
+                }
+                // the file changed under us: read its sha and try once more
+                Err(ureq::Error::Status(409 | 422, _)) if attempt == 0 => continue,
+                Err(e) => return Err(said(e)),
+            }
+        }
+        Err(unreachable(format!("{path} could not be written")))
+    }
+
+    /// What was spoken at `path`, asked for only if it changed since the last answer; nothing, if nothing was.
+    pub fn spoken(&self, path: &str) -> Result<Option<String>, Trouble> {
+        let key = format!("contents/{path}?ref={SPOKEN}");
+        let mut request = self
+            .call("GET", &key)
+            .set("Accept", "application/vnd.github.raw");
+        if let Some((etag, _)) = self.texts.borrow().get(&key) {
+            request = request.set("If-None-Match", etag);
+        }
+        match request.call() {
+            Ok(r) if r.status() == 304 => {
+                self.note_budget(&r);
+                Ok(self.texts.borrow().get(&key).map(|(_, text)| text.clone()))
+            }
+            Ok(r) => {
+                self.note_budget(&r);
+                let etag = r.header("ETag").map(str::to_string);
+                let text = r.into_string().map_err(unreachable)?;
+                if let Some(etag) = etag {
+                    self.texts.borrow_mut().insert(key, (etag, text.clone()));
+                }
+                Ok(Some(text))
+            }
+            Err(ureq::Error::Status(404, _)) => Ok(None),
             Err(e) => Err(said(e)),
         }
     }

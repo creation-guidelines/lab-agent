@@ -13,6 +13,8 @@ pub enum Command {
     Standing,
     Next,
     Run,
+    Log,
+    Wait,
 }
 
 impl Command {
@@ -23,6 +25,8 @@ impl Command {
         Command::Standing,
         Command::Next,
         Command::Run,
+        Command::Log,
+        Command::Wait,
     ];
 
     /// How it is typed.
@@ -34,6 +38,8 @@ impl Command {
             Command::Standing => "standing",
             Command::Next => "next",
             Command::Run => "run",
+            Command::Log => "log",
+            Command::Wait => "wait",
         }
     }
 
@@ -46,6 +52,8 @@ impl Command {
             Command::Standing => "Where every job stands, and which drivers are here",
             Command::Next => "What the agent would do now, and why anything waits - it names the acts and takes none",
             Command::Run => "Do the work: start what may start, write down how each job ends, never run one twice",
+            Command::Log => "A job's output: log JOB",
+            Command::Wait => "Wait for a job to end, then print its output; the exit status says how it ended (waiting is a beat)",
         }
     }
 
@@ -105,7 +113,7 @@ contract! {
     JOB: String, Command = Input {
         key:         "job",
         ty:          Type::String,
-        subcommands: &[Command::Submit, Command::Release],
+        subcommands: &[Command::Submit, Command::Release, Command::Log, Command::Wait],
         arg:         Some(Arg { value_name: "JOB", ..Arg::positional(0) }),
         summary:     "The job's name: letters, digits, '-', '_' and '.'",
         ..Input::EMPTY
@@ -169,10 +177,21 @@ contract! {
     VIA: String, Command = Input {
         key:         "via",
         ty:          Type::String,
-        subcommands: &[Command::Submit, Command::Beat],
+        subcommands: &[Command::Submit, Command::Beat, Command::Standing, Command::Log, Command::Wait],
         env:         Some(Env::new("OCO_AGENT_VIA")),
         arg:         Some(Arg { value_name: "OWNER/REPO", ..Arg::long("via") }),
-        summary:     "Ask, or beat, through this GitHub repository instead of this machine's folder",
+        summary:     "Ask, beat, or see, through this GitHub repository instead of this machine's folder",
+        ..Input::EMPTY
+    };
+
+    /// How long `wait` waits.
+    WITHIN: u64, Command = Input {
+        key:         "within",
+        ty:          Type::Uint,
+        default:     Some(600),
+        subcommands: &[Command::Wait],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("within") }),
+        summary:     "How long to wait for the job to end, in seconds",
         ..Input::EMPTY
     };
 
