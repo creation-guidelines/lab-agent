@@ -852,6 +852,7 @@ dependencies = [
  "argenv",
  "argenv-resolve",
  "oco-agent-core",
+ "oco-agent-github",
  "oco-agent-journal-in-tad",
  "serde",
 ]
@@ -859,6 +860,16 @@ dependencies = [
 [[package]]
 name = "oco-agent-core"
 version = "0.1.0"
+
+[[package]]
+name = "oco-agent-github"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "oco-agent-core",
+ "serde_json",
+ "ureq",
+]
 
 [[package]]
 name = "oco-agent-journal-in-tad"

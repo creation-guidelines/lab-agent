@@ -165,6 +165,39 @@ contract! {
         ..Input::EMPTY
     };
 
+    /// Ask through a repository instead of this machine's folder.
+    VIA: String, Command = Input {
+        key:         "via",
+        ty:          Type::String,
+        subcommands: &[Command::Submit, Command::Beat],
+        env:         Some(Env::new("OCO_AGENT_VIA")),
+        arg:         Some(Arg { value_name: "OWNER/REPO", ..Arg::long("via") }),
+        summary:     "Ask, or beat, through this GitHub repository instead of this machine's folder",
+        ..Input::EMPTY
+    };
+
+    /// Take work in from a repository.
+    LISTEN: String, Command = Input {
+        key:         "listen",
+        ty:          Type::String,
+        subcommands: &[Command::Run],
+        env:         Some(Env::new("OCO_AGENT_LISTEN")),
+        arg:         Some(Arg { value_name: "OWNER/REPO", ..Arg::long("listen") }),
+        summary:     "Take in work asked for, and drivers' beats, from this GitHub repository",
+        ..Input::EMPTY
+    };
+
+    /// How often work is taken in.
+    LISTEN_EVERY: u64, Command = Input {
+        key:         "listen_every",
+        ty:          Type::Uint,
+        default:     Some(15),
+        subcommands: &[Command::Run],
+        arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("listen-every") }),
+        summary:     "How often work and beats are taken in from the repository, in seconds",
+        ..Input::EMPTY
+    };
+
     /// How often the runner looks.
     EVERY: u64, Command = Input {
         key:         "every",
