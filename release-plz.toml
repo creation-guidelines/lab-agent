@@ -17,19 +17,29 @@ git_release_enable = true
 [[package]]
 name = "oco-agent-core"
 release = false
+# its own tag name: sharing lab-agent's (v{{ version }}) made release-plz look for it at lab-agent's tags
+git_tag_name = "oco-agent-core-v{{ version }}"
 
 [[package]]
 name = "oco-agent-journal-in-tad"
 release = false
+# its own tag name: sharing lab-agent's (v{{ version }}) made release-plz look for it at lab-agent's tags
+git_tag_name = "oco-agent-journal-in-tad-v{{ version }}"
 
 [[package]]
 name = "oco-agent-replay"
 release = false
+# its own tag name: sharing lab-agent's (v{{ version }}) made release-plz look for it at lab-agent's tags
+git_tag_name = "oco-agent-replay-v{{ version }}"
 
 [[package]]
 name = "oco-agent"
 release = false
+# its own tag name: sharing lab-agent's (v{{ version }}) made release-plz look for it at lab-agent's tags
+git_tag_name = "oco-agent-v{{ version }}"
 
 [[package]]
 name = "oco-agent-github"
 release = false
+# its own tag name: sharing lab-agent's (v{{ version }}) made release-plz look for it at lab-agent's tags
+git_tag_name = "oco-agent-github-v{{ version }}"
