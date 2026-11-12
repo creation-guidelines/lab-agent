@@ -1,0 +1,15 @@
+#!/bin/sh
+# Installs oco-agent as this user's service, listening and speaking to the repository given. It runs
+# beside lab-agent. The way back: systemctl --user disable --now oco-agent
+set -eu
+repo=${1:?give the repository work is asked through, e.g. grenudi/lab-agent-jobs}
+cd "$(dirname "$0")/../.."
+cargo build -q --release -p oco-agent
+install -Dm755 target/release/oco-agent "$HOME/.local/bin/oco-agent"
+mkdir -p "$HOME/.config/systemd/user"
+sed "s|@REPO@|$repo|" oco-agent/service/oco-agent.service > "$HOME/.config/systemd/user/oco-agent.service"
+systemctl --user daemon-reload
+systemctl --user enable oco-agent.service >/dev/null 2>&1
+systemctl --user restart oco-agent.service
+sleep 3
+systemctl --user is-active --quiet oco-agent.service && echo "oco-agent serves, listening and speaking to $repo" || { echo "oco-agent did not start:" >&2; journalctl --user -u oco-agent -n 8 --no-pager >&2; exit 1; }

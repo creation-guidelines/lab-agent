@@ -109,3 +109,23 @@ steps - into a small core of its own, and records the reason.
 3. **Isolation and resources** - worktrees per job; side by side by resource; fencing tokens.
 4. **Through ocoeco** - glimpses from flows; the board as a view; updates composed from the journal.
 5. **Secrets** - the credential helper; the token rotated.
+
+## The switch (2026-11-12)
+
+oco-agent takes over the running of jobs from lab-agent's daemon step by step, each step with a way back.
+What does **not** move yet: lab-agent's daemon also carries the author's voice - a notification when a job
+ends, the board pushed to the phone every few minutes - so it keeps running until oco-agent has a voice of
+its own; it is simply no longer asked to run jobs. lab-agent's client (board, inbox, notify, ask) stays.
+
+1. **oco-agent serves beside lab-agent** - a service of its own on the lab (`oco-agent/service/install`),
+   listening and speaking to the jobs repository, its work under `oco-agent/jobs`, apart from lab-agent's
+   `jobs/`. Each agent does one job at a time; a driver uses one agent at a time, so they do not work in
+   the same clones together. *Way back: `systemctl --user disable --now oco-agent`.*
+2. **oco-agent's client reaches drivers** - shipped in lab-agent's release (the same binaries and
+   packages), so a driver anywhere installs it as it installs lab-agent. *Way back: none needed.*
+3. **Drivers move** - first the AI driving the lab: it asks through oco-agent (`--via`), and falls back to
+   lab-agent, still running, if anything is wrong. *Way back: ask through lab-agent again.*
+4. **The watcher probes oco-agent** - so the outside watch tests the agent that does the work; the shadow
+   keeps judging lab-agent, which should start nothing. *Way back: reinstall the earlier workflow.*
+5. **lab-agent's daemon stops running jobs** - once oco-agent has carried the work for a while without the
+   shadow or the watcher speaking up, and has a voice of its own. Then the repository takes oco-agent's name.
