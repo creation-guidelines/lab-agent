@@ -1,0 +1,86 @@
+name: watch the lab
+# The watcher outside the machine. It lives in this public repository because GitHub does not reliably
+# run schedules in private ones: in the jobs repository its schedule never fired once (2026-11-12).
+# Every quarter hour it checks that oco-agent answered the last probe - a tiny job asked through the jobs
+# repository, by the driver "watcher" - and asks a new one every half hour. Any end of the probe counts
+# as an answer, expired too: a lab that comes back late still answers. If the lab has not answered for
+# too long it alerts the urgent channel itself, once, and says so when the lab answers again. It keeps
+# only the newest probes, so their folder never grows.
+on:
+  schedule:
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Minutes without an answer before alerting"
+        default: "45"
+      every:
+        description: "Minutes between probes"
+        default: "30"
+      test:
+        description: "Mark any message as a test"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: watch-the-lab
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the last probe, alert if the lab is silent, ask a new one
+        env:
+          GH_TOKEN: ${{ secrets.LAB_TOKEN }}
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NTFY_URGENT_TOPIC: ${{ secrets.NTFY_URGENT_TOPIC }}
+          NTFY_INFO_TOPIC: ${{ secrets.NTFY_INFO_TOPIC }}
+          JOBS: grenudi/lab-agent-jobs
+          LIMIT: ${{ inputs.limit || '45' }}
+          EVERY: ${{ inputs.every || '30' }}
+          TEST: ${{ inputs.test && 'TEST, nothing to do - ' || '' }}
+          STARTED_BY: ${{ github.event_name }}
+        run: |
+          set -eu
+          echo "started by: $STARTED_BY"
+          now=$(date +%s)
+          raw() { gh api -H "Accept: application/vnd.github.raw" "repos/$JOBS/contents/$1" 2>/dev/null || true; }
+          say() { curl -fsS -H "Title: $1" -H "Priority: $2" -d "$3" "$NTFY_SERVER/$4" >/dev/null; }
+          put() {
+            sha=$(gh api "repos/$JOBS/contents/$1" -q .sha 2>/dev/null || true)
+            gh api -X PUT "repos/$JOBS/contents/$1" -f message="$2" -f content="$(printf '%s' "$3" | base64 -w0)" ${sha:+-f sha="$sha"} >/dev/null
+          }
+          probes=$(gh api "repos/$JOBS/git/trees/main:oco-agent/jobs" -q '.tree[].path' | grep -E '^probe-[0-9]+\.sh$' | sort || true)
+          last=$(echo "$probes" | tail -1); last=${last%.sh}
+          state=$(raw probes/state); state=${state:-listening}
+          ended=no
+          if [ -n "$last" ] && raw "oco-agent/journal.json?ref=spoken" | grep "\"job\":\"$last\"" | grep -qE '"what":"(finished|expired|parked)"'; then ended=yes; fi
+          if [ -n "$last" ] && [ "$ended" = no ]; then
+            silent=$(( (now - ${last#probe-}) / 60 ))
+            echo "the lab has not answered $last for $silent min"
+            if [ "$silent" -ge "$LIMIT" ] && [ "$state" != alerted ]; then
+              say "${TEST}the lab is silent" urgent "The lab has not answered the watcher's probe for $silent min ($last). oco-agent, the machine or its network may have stopped. Look at the lab." "$NTFY_URGENT_TOPIC"
+              put probes/state "watcher: alerted" "alerted"
+              echo "alerted the urgent channel"
+            fi
+          else
+            if [ -n "$last" ]; then echo "the lab answered $last"; fi
+            if [ "$state" = alerted ]; then
+              say "${TEST}the lab answers again" default "The lab answered the watcher's probe $last." "$NTFY_INFO_TOPIC"
+              put probes/state "watcher: listening" "listening"
+              echo "told the info channel the lab is back"
+            fi
+            if [ -z "$last" ] || [ $(( (now - ${last#probe-}) / 60 )) -ge "$EVERY" ]; then
+              beat="{\"driver\":\"watcher\",\"at\":$now}"
+              gh api -X PATCH "repos/$JOBS/actions/variables/OCO_AGENT_BEAT_WATCHER" -f name=OCO_AGENT_BEAT_WATCHER -f value="$beat" >/dev/null 2>&1 \
+                || gh api -X POST "repos/$JOBS/actions/variables" -f name=OCO_AGENT_BEAT_WATCHER -f value="$beat" >/dev/null
+              printf '#!/bin/sh\n# oco-agent: by=watcher asked=%s start-within=1800 may-run=60\necho "the lab answers the watcher"\n' "$now" > probe.sh
+              gh api -X PUT "repos/$JOBS/contents/oco-agent/jobs/probe-$now.sh" -f message="watcher: probe-$now" -f content="$(base64 -w0 < probe.sh)" >/dev/null
+              echo "asked probe-$now"
+              for old in $(echo "$probes" | head -n -2); do
+                sha=$(gh api "repos/$JOBS/contents/oco-agent/jobs/$old" -q .sha) && gh api -X DELETE "repos/$JOBS/contents/oco-agent/jobs/$old" -f message="watcher: clear $old" -f sha="$sha" >/dev/null
+              done
+            fi
+          fi
