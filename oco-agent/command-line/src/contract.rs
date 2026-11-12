@@ -15,6 +15,8 @@ pub enum Command {
     Run,
     Log,
     Wait,
+    Say,
+    Inbox,
 }
 
 impl Command {
@@ -27,6 +29,8 @@ impl Command {
         Command::Run,
         Command::Log,
         Command::Wait,
+        Command::Say,
+        Command::Inbox,
     ];
 
     /// How it is typed.
@@ -40,6 +44,8 @@ impl Command {
             Command::Run => "run",
             Command::Log => "log",
             Command::Wait => "wait",
+            Command::Say => "say",
+            Command::Inbox => "inbox",
         }
     }
 
@@ -54,6 +60,8 @@ impl Command {
             Command::Run => "Do the work: start what may start, write down how each job ends, never run one twice",
             Command::Log => "A job's output: log JOB",
             Command::Wait => "Wait for a job to end, then print its output; the exit status says how it ended (waiting is a beat)",
+            Command::Say => "Say something to another driver: say TEXT --to NAME [--urgent] (carried to their phone if they have one here)",
+            Command::Inbox => "What was said to you, or to everyone, after a place: inbox [--after N]",
         }
     }
 
@@ -192,6 +200,48 @@ contract! {
         subcommands: &[Command::Wait],
         arg:         Some(Arg { value_name: "SECONDS", ..Arg::long("within") }),
         summary:     "How long to wait for the job to end, in seconds",
+        ..Input::EMPTY
+    };
+
+    /// What is said.
+    TEXT: String, Command = Input {
+        key:         "text",
+        ty:          Type::String,
+        subcommands: &[Command::Say],
+        arg:         Some(Arg { value_name: "TEXT", ..Arg::positional(0) }),
+        summary:     "What to say",
+        ..Input::EMPTY
+    };
+
+    /// Whom it is said to.
+    TO: String, Command = Input {
+        key:         "to",
+        ty:          Type::String,
+        subcommands: &[Command::Say],
+        arg:         Some(Arg { value_name: "NAME", ..Arg::long("to") }),
+        summary:     "Whom it is said to: a driver's name, or * for everyone",
+        ..Input::EMPTY
+    };
+
+    /// The one it is said to is needed now.
+    URGENT: bool, Command = Input {
+        key:         "urgent",
+        ty:          Type::Bool,
+        default:     Some(false),
+        subcommands: &[Command::Say],
+        arg:         Some(Arg { negatable: false, ..Arg::long("urgent") }),
+        summary:     "The one it is said to is needed now: carried on their urgent channel",
+        ..Input::EMPTY
+    };
+
+    /// Where reading starts.
+    AFTER: u64, Command = Input {
+        key:         "after",
+        ty:          Type::Uint,
+        default:     Some(0),
+        subcommands: &[Command::Inbox],
+        arg:         Some(Arg { value_name: "PLACE", ..Arg::long("after") }),
+        summary:     "Read what was said after this place (inbox prints the place it read up to)",
         ..Input::EMPTY
     };
 

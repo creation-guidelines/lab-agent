@@ -377,3 +377,112 @@ pub fn beats_are_remembered_and_never_go_back(beats: &mut impl Beats) {
         Some(&11)
     );
 }
+
+/// What is said is kept in order, reaches whom it is for, and is told once - and a voice that fails
+/// is not asked again at once.
+pub fn sayings_are_kept_and_told_once(sayings: &mut impl crate::saying::Sayings) {
+    use crate::saying::{carry, for_whom, Said, Voice};
+    let say = |from: &str, to: &str, at: Moment, text: &str, urgent: bool| Said {
+        from: from.into(),
+        to: to.into(),
+        at,
+        text: text.into(),
+        urgent,
+        told_at: None,
+    };
+    assert!(
+        sayings.said().expect("the sayings answer").is_empty(),
+        "nothing has been said yet"
+    );
+    sayings
+        .say(say("claude", "ann", 1, "the docs are landed", false))
+        .expect("a saying is kept");
+    sayings
+        .say(say("ann", "*", 2, "thank you - and the Кириллица?", false))
+        .expect("a saying is kept");
+    sayings
+        .say(say("claude", "ann", 3, "the lab is silent", true))
+        .expect("a saying is kept");
+    let all = sayings.said().expect("the sayings answer");
+    assert_eq!(
+        all.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
+        [
+            "the docs are landed",
+            "thank you - and the Кириллица?",
+            "the lab is silent"
+        ]
+    );
+    assert_eq!(
+        for_whom(&all, "claude", 0)
+            .iter()
+            .map(|(place, _)| *place)
+            .collect::<Vec<_>>(),
+        [2],
+        "claude reads what ann said to everyone"
+    );
+    assert_eq!(
+        for_whom(&all, "ann", 1)
+            .iter()
+            .map(|(place, _)| *place)
+            .collect::<Vec<_>>(),
+        [3],
+        "ann reads what is new to her"
+    );
+
+    /// A phone that reaches ann, and can be out of order.
+    struct Phone {
+        heard: Vec<String>,
+        works: bool,
+    }
+    impl Voice for Phone {
+        fn reaches(&self, driver: &str) -> bool {
+            driver == "ann"
+        }
+        fn tell(&mut self, said: &Said) -> Result<(), String> {
+            if !self.works {
+                return Err("out of order".into());
+            }
+            self.heard.push(said.text.clone());
+            Ok(())
+        }
+    }
+    let mut dead = Phone {
+        heard: Vec::new(),
+        works: false,
+    };
+    assert_eq!(
+        carry(sayings, &mut dead, 9).expect("the sayings answer"),
+        0,
+        "a voice out of order carries nothing"
+    );
+    assert!(
+        sayings
+            .said()
+            .expect("the sayings answer")
+            .iter()
+            .all(|s| s.told_at.is_none()),
+        "and nothing is marked as told"
+    );
+    let mut phone = Phone {
+        heard: Vec::new(),
+        works: true,
+    };
+    assert_eq!(
+        carry(sayings, &mut phone, 10).expect("the sayings answer"),
+        2
+    );
+    assert_eq!(
+        phone.heard,
+        ["the docs are landed", "the lab is silent"],
+        "what was said to ann, in order; not what she said herself"
+    );
+    assert_eq!(
+        carry(sayings, &mut phone, 11).expect("the sayings answer"),
+        0,
+        "told once"
+    );
+    assert_eq!(
+        sayings.said().expect("the sayings answer")[0].told_at,
+        Some(10)
+    );
+}

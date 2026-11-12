@@ -64,3 +64,8 @@ fn beats_are_remembered_and_never_go_back() {
         &mut oco_agent_core::leases::InMemory::default(),
     );
 }
+
+#[test]
+fn sayings_are_kept_and_told_once() {
+    measure::sayings_are_kept_and_told_once(&mut oco_agent_core::saying::InMemory::default());
+}

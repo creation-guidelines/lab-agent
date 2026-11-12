@@ -263,3 +263,65 @@ impl Beats for InTad {
         Ok(())
     }
 }
+
+impl oco_agent_core::saying::Sayings for InTad {
+    fn said(&self) -> Result<Vec<oco_agent_core::saying::Said>, Trouble> {
+        let text = match std::fs::read_to_string(self.data().join("said.json")) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(unreachable(e)),
+        };
+        let mut placed = Vec::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let Ok(Value::Object(row)) = serde_json::from_str::<Value>(line) else {
+                return Err(unreachable("a line of what was said is not a row"));
+            };
+            placed.push((
+                whole(&row, "place")?,
+                oco_agent_core::saying::Said {
+                    from: words(&row, "from").to_string(),
+                    to: words(&row, "to").to_string(),
+                    at: whole(&row, "at")?,
+                    text: words(&row, "text").to_string(),
+                    urgent: row.get("urgent").and_then(Value::as_bool).unwrap_or(false),
+                    told_at: row.get("told_at").and_then(Value::as_u64),
+                },
+            ));
+        }
+        placed.sort_by_key(|(place, _)| *place);
+        Ok(placed.into_iter().map(|(_, said)| said).collect())
+    }
+
+    fn say(&mut self, said: oco_agent_core::saying::Said) -> Result<(), Trouble> {
+        let _turn = Turn::take(&self.folder)?;
+        let place = (self.said()?.len() + 1).to_string();
+        let mut row = vec![
+            ("from".to_string(), said.from),
+            ("to".to_string(), said.to),
+            ("at".to_string(), said.at.to_string()),
+            ("text".to_string(), said.text),
+            ("urgent".to_string(), said.urgent.to_string()),
+        ];
+        if let Some(at) = said.told_at {
+            row.push(("told_at".to_string(), at.to_string()));
+        }
+        tad::set(&self.data(), &self.declaration, "said", &[place], &row).map_err(unreachable)?;
+        Ok(())
+    }
+
+    fn told(&mut self, place: usize, at: Moment) -> Result<(), Trouble> {
+        let _turn = Turn::take(&self.folder)?;
+        if place == 0 || place > self.said()?.len() {
+            return Err(unreachable(format!("nothing was said at place {place}")));
+        }
+        tad::set(
+            &self.data(),
+            &self.declaration,
+            "said",
+            &[place.to_string()],
+            &[("told_at".to_string(), at.to_string())],
+        )
+        .map_err(unreachable)?;
+        Ok(())
+    }
+}
