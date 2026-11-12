@@ -72,3 +72,7 @@ assets = [
 
 [package.metadata.generate-rpm.requires]
 ca-certificates = "*"
+
+[workspace]
+members = ["oco-agent/core"]
+resolver = "2"

@@ -1,0 +1,10 @@
+[package]
+name = "oco-agent-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "oco-agent's core: the rules of coordinating work, with nothing in it that touches the world"
+license = "MIT"
+publish = false
+
+[dependencies]
