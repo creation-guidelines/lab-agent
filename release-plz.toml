@@ -15,3 +15,7 @@ git_release_enable = true
 [[package]]
 name = "oco-agent-core"
 release = false
+
+[[package]]
+name = "oco-agent-journal-in-tad"
+release = false

@@ -74,5 +74,5 @@ assets = [
 ca-certificates = "*"
 
 [workspace]
-members = ["oco-agent/core"]
+members = ["oco-agent/core", "oco-agent/journal-in-tad"]
 resolver = "2"

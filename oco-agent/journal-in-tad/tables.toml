@@ -1,0 +1,17 @@
+# oco-agent's journal, declared as data (tad): one row for each thing that happened to a job, in order.
+# The folder is an ordinary tad dataset: read and diff data/journal.json, reshape it with text tools,
+# or ask it in SQL (tad sql "SELECT job, what FROM journal ORDER BY place").
+
+[tables.journal]
+key = ["place"]
+fields = [
+    { name = "place", type = "integer", required = true, minimum = 1.0 },
+    { name = "job", type = "string", required = true },
+    { name = "at", type = "integer", required = true },
+    { name = "what", type = "string", required = true, enum = ["submitted", "claimed", "finished", "parked", "released", "expired"] },
+    { name = "by", type = "string" },
+    { name = "start_by", type = "integer" },
+    { name = "run", type = "integer" },
+    { name = "outcome", type = "string", enum = ["done", "failed", "timed-out"] },
+    { name = "why", type = "string", enum = ["the-agent-restarted"] },
+]
