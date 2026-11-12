@@ -1,0 +1,9 @@
+[Unit]
+Description=The lab observes what has run, every quarter hour (about 44 GitHub requests each time)
+
+[Timer]
+OnCalendar=*:2/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
