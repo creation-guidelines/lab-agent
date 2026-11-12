@@ -10,3 +10,8 @@ git_release_enable = false
 [[package]]
 name = "lab-agent"
 git_release_enable = true
+
+# oco-agent grows here beside lab-agent; it is not released until it takes over.
+[[package]]
+name = "oco-agent-core"
+release = false
