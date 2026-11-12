@@ -213,6 +213,14 @@ fn run(
         None => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}", folder.display()),
     }
     loop {
+        // asked to restart (a new build was installed): it does so between jobs, never in the middle of
+        // one - leaving cleanly here lets the service manager start the new build
+        let asked = folder.join("restart-asked");
+        if asked.exists() && doing.running().is_empty() {
+            let _ = std::fs::remove_file(&asked);
+            println!("oco-agent: restarting between jobs, as asked");
+            return Ok(());
+        }
         let now = seconds();
         if let Some((remote, listen_every)) = &listen {
             // the hour's GitHub budget is shared by everything on the account: when it runs low, take in less often
