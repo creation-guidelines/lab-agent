@@ -1,16 +1,13 @@
-#!/bin/sh
-# Installs the watcher into the jobs repository: its workflow, and the notification channels it alerts
-# (read from this user's lab-agent notify.toml and handed to GitHub as secrets - never printed).
+# Hands the watcher, in this repository, what it needs as GitHub secrets - read from this user's
+# lab-agent files and given through standard input, never printed.
 set -eu
-repo=${1:?give the jobs repository, e.g. grenudi/lab-agent-jobs}
-here=$(dirname "$0")
+repo=${1:-creation-guidelines/lab-agent}
 export GH_TOKEN="${GH_TOKEN:-$(cat "$HOME/.config/lab-agent/token")}"
 conf="$HOME/.config/lab-agent/notify.toml"
 value() { sed -n "s/^$1 *= *\"\(.*\)\"/\1/p" "$conf" | head -1; }
+tr -d '\n' < "$HOME/.config/lab-agent/token" | gh secret set LAB_TOKEN -R "$repo" >/dev/null
 for pair in NTFY_SERVER:server NTFY_URGENT_TOPIC:urgent_topic NTFY_INFO_TOPIC:info_topic; do
 	v=$(value "${pair#*:}"); [ -n "$v" ] || { echo "install: $conf has no ${pair#*:}" >&2; exit 1; }
 	printf %s "$v" | gh secret set "${pair%%:*}" -R "$repo" >/dev/null
 done
-sha=$(gh api "repos/$repo/contents/.github/workflows/watch.yml" -q .sha 2>/dev/null || true)
-gh api -X PUT "repos/$repo/contents/.github/workflows/watch.yml" -f message="the watcher outside the machine" -f content="$(base64 -w0 < "$here/watch.yml")" ${sha:+-f sha="$sha"} >/dev/null
-echo "the watcher is installed in $repo"
+echo "the watcher's secrets are set in $repo"

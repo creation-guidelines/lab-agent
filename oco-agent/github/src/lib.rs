@@ -160,16 +160,21 @@ impl GitHub {
         }
     }
 
-    /// The names of every job asked for.
+    /// The names of every job asked for, read from the git tree of the folder: unlike the contents
+    /// listing, which silently stops at 1,000 entries (how lab-agent came to replay finished jobs), the
+    /// tree says when it is cut short - and then nothing is taken in until it is whole.
     pub fn asked(&self) -> Result<Vec<String>, Trouble> {
         let listing = self
-            .listing(&format!("contents/{ASKED}?ref={}", self.branch))?
+            .listing(&format!("git/trees/{}:{ASKED}", self.branch))?
             .unwrap_or(Value::Null);
-        Ok(listing
+        if listing["truncated"].as_bool() == Some(true) {
+            return Err(unreachable("GitHub's listing of the asked work is cut short; nothing is taken in until it is whole"));
+        }
+        Ok(listing["tree"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|f| f["name"].as_str()?.strip_suffix(".sh").map(str::to_string))
+            .filter_map(|f| f["path"].as_str()?.strip_suffix(".sh").map(str::to_string))
             .collect())
     }
 
