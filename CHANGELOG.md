@@ -1,6 +1,25 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.53]
+
+
+### Documentation
+- The 2026-11-11 incident recorded: a stall, a replay, a token in a URL ([#128](https://github.com/creation-guidelines/lab-agent/pull/128)) ([5312521])
+- Lab-agent flows through ocoeco: the hands and the voice ([#129](https://github.com/creation-guidelines/lab-agent/pull/129)) ([0106023])
+- The redesign after the incident: research, design and five stages ([#131](https://github.com/creation-guidelines/lab-agent/pull/131)) ([bd67871])
+- The redesign: ports and adapters, plain names, the journal as tad tables ([#132](https://github.com/creation-guidelines/lab-agent/pull/132)) ([fcb65f8])
+- The journal's SQL is tad's, on DuckDB as tad's research chose ([#133](https://github.com/creation-guidelines/lab-agent/pull/133)) ([f47d868])
+- The redesign is called oco-agent; the AI driving it is the driver ([#134](https://github.com/creation-guidelines/lab-agent/pull/134)) ([69813cd])
+- Oco-agent coordinates work for any driver, person or machine ([#135](https://github.com/creation-guidelines/lab-agent/pull/135)) ([a0928dd])
+
+
+### Miscellaneous
+- Glimpses are recorded here from now on ([#126](https://github.com/creation-guidelines/lab-agent/pull/126)) ([32f8f74])
+- Parked: the lab-agent redesign comes first; each item keeps its resume point ([#130](https://github.com/creation-guidelines/lab-agent/pull/130)) ([5ebcf72])
+
+
+
 ## [0.1.52]
 
 
