@@ -1,7 +1,7 @@
 # oco-agent: lab-agent, redesigned (2026-11-12)
 
 The redesigned program is called **oco-agent** (decision 2026-11-12-oco-agent): built on ocoeco, born beside
-lab-agent, which serves until the switch. The AI driving it is *the driver*; oco-agent is the machine's hands and voice.
+lab-agent, which serves until the switch. Whoever drives it - a person or a machine - is *the driver*, and oco-agent treats them alike: it is the commons' system for coordinating work.
 
 Written after the incident of 2026-11-11: a stall, then 102 finished jobs replayed after a reboot -
 fifty at a time after a reconnect, on shared clones - while no alert could reach the author. No harm was
