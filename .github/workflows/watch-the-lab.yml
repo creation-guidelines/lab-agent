@@ -1,14 +1,13 @@
 name: watch the lab
-# The watcher outside the machine. It lives in this public repository because GitHub does not reliably
-# run schedules in private ones: in the jobs repository its schedule never fired once (2026-11-12).
-# Every quarter hour it checks that oco-agent answered the last probe - a tiny job asked through the jobs
-# repository, by the driver "watcher" - and asks a new one every half hour. Any end of the probe counts
+# The probe of the whole path, run by hand: it checks that oco-agent answered the last probe - a tiny job
+# asked through the jobs repository, by the driver "watcher" - and asks a new one. It no longer runs on a
+# schedule: GitHub's schedules are best-effort - delayed by hours on a new repository, sometimes dropped,
+# silently (here: first run nine hours late, then none). The lab's watcher is its pulse, received outside
+# by Healthchecks (decision 2026-11-12-the-pulse-is-the-watcher). Any end of the probe counts
 # as an answer, expired too: a lab that comes back late still answers. If the lab has not answered for
 # too long it alerts the urgent channel itself, once, and says so when the lab answers again. It keeps
 # only the newest probes, so their folder never grows.
 on:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       limit:
