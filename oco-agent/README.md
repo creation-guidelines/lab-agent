@@ -26,4 +26,5 @@ proven and takes over (then this repository takes its name). The design, and why
   repository probes oco-agent through the jobs repository every half hour and alerts the urgent channel
   itself if the lab has not answered for 45 minutes.
 - [`service/`](service/) - oco-agent as a service on the lab, beside lab-agent: `oco-agent/service/install OWNER/REPO`.
-  It keeps the lab awake while it serves. The switch, step by step with a way back at each: `../DESIGN.md`.
+  It keeps the lab awake while it serves. A job never restarts the agent that runs it - that cuts the job off,
+  and the new run parks it; asked from inside a job, the installer leaves the restart to systemd, ten seconds on. The switch, step by step with a way back at each: `../DESIGN.md`.

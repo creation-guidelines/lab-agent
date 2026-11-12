@@ -10,6 +10,13 @@ mkdir -p "$HOME/.config/systemd/user"
 sed "s|@REPO@|$repo|" oco-agent/service/oco-agent.service > "$HOME/.config/systemd/user/oco-agent.service"
 systemctl --user daemon-reload
 systemctl --user enable oco-agent.service >/dev/null 2>&1
+if [ -n "${OCO_AGENT_JOB:-}" ]; then
+	# asked from inside a job oco-agent runs: restarting it now would cut that job off (it would be parked),
+	# so the restart is left to systemd, ten seconds on, when the job has ended
+	systemd-run --user --quiet --on-active=10 --unit="oco-agent-restart-$(date +%s)" systemctl --user restart oco-agent.service
+	echo "oco-agent will restart in 10 s (asked from inside one of its jobs), listening and speaking to $repo"
+	exit 0
+fi
 systemctl --user restart oco-agent.service
 sleep 3
 systemctl --user is-active --quiet oco-agent.service && echo "oco-agent serves, listening and speaking to $repo" || { echo "oco-agent did not start:" >&2; journalctl --user -u oco-agent -n 8 --no-pager >&2; exit 1; }
