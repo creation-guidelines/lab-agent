@@ -165,8 +165,8 @@ fn setup_systemd() -> Result<()> {
     std::fs::create_dir_all(&unit_dir)?;
     let exe = std::env::current_exe()?;
     let unit = format!(
-        "[Unit]\nDescription=lab-agent: runs jobs pulled from git, reports progress through git\n\n\
-         [Service]\nExecStart={exe} run\nRestart=on-failure\nRestartSec=5\nStartLimitIntervalSec=0\n\n\
+        "[Unit]\nDescription=lab-agent: runs jobs pulled from git, reports progress through git\nStartLimitIntervalSec=0\n\n\
+         [Service]\nExecStart={exe} run\nRestart=on-failure\nRestartSec=5\n\n\
          [Install]\nWantedBy=default.target\n",
         exe = exe.display()
     );
