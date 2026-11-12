@@ -27,3 +27,7 @@ release = false
 [[package]]
 name = "oco-agent"
 release = false
+
+[[package]]
+name = "oco-agent-github"
+release = false

@@ -14,6 +14,10 @@ proven and takes over (then this repository takes its name). The design, and why
 - [`command-line/`](command-line/) - the program a driver types: `oco-agent beat | submit | release | standing | next | run`,
   its command line declared once with argenv. `run` does the work through the processes on this machine:
   a job is claimed before it starts, every process it starts carries its mark and ends with it.
+- [`github/`](github/) - oco-agent on GitHub, the only part that knows it: work asked for as files under
+  `oco-agent/jobs` in a repository (a top line, read only at the top, says who asked, when, and the limits),
+  drivers' beats as its Actions variables. A driver asks with `--via OWNER/REPO`; the runner takes in with
+  `run --listen OWNER/REPO`.
 - [`shadow/`](shadow/) - the shadow run: every ten minutes a timer on the lab feeds lab-agent's newest log lines
   through oco-agent's rules and alerts urgently if lab-agent started work oco-agent would have refused. It
   decides; it never acts. Installed with `oco-agent/shadow/install`.

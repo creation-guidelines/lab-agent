@@ -6,6 +6,8 @@ use oco_agent_core::journal::{
     standing, state, Entry, Happened, Journal, Moment, Outcome, State, Trouble,
 };
 use oco_agent_core::leases::{Beats, Leases};
+use oco_agent_github::{Asking, GitHub};
+use std::collections::HashSet;
 use std::path::Path;
 
 /// A span of seconds, the way a person says it.
@@ -38,8 +40,9 @@ pub fn plainly(trouble: &Trouble) -> String {
     }
 }
 
-/// A job's name becomes a file's name, so it holds only what is safe in one.
-fn a_safe_name(job: &str) -> Result<(), Trouble> {
+/// A job's name becomes a file's name, and a driver's a word in a job's top line, so each holds only
+/// what is safe there.
+pub fn a_safe_name(job: &str) -> Result<(), Trouble> {
     let fine = !job.is_empty()
         && job.len() <= 100
         && !job.starts_with('.')
@@ -194,6 +197,91 @@ pub fn what_next(
         text.push_str("nothing to do\n");
     }
     Ok(text)
+}
+
+/// Asks for a job through a repository: the asking is itself a beat there.
+pub fn submit_via(remote: &mut GitHub, r: &Request, now: Moment) -> Result<String, Trouble> {
+    a_safe_name(r.job)?;
+    a_safe_name(r.who).map_err(|_| Trouble::Refused {
+        job: r.job.into(),
+        because: format!(
+            "the driver's name {:?} may hold only letters, digits, '-', '_' and '.'",
+            r.who
+        ),
+    })?;
+    remote.beat(r.who, now)?;
+    let script = r.script.unwrap_or("").to_string();
+    remote.ask(&Asking {
+        job: r.job.into(),
+        by: r.who.into(),
+        asked: now,
+        start_within: r.start_within,
+        may_run: r.may_run,
+        script,
+    })?;
+    Ok(format!(
+        "{}: asked for by {} through {}; it starts within {} or not at all, and may run for {}\n",
+        r.job,
+        r.who,
+        remote.repo,
+        span(r.start_within),
+        span(r.may_run)
+    ))
+}
+
+/// Takes in what was asked through a repository: drivers' beats, mirrored into the local ones, and every
+/// job not yet in the journal. A job is written down with the moment it was asked, so work asked long
+/// ago expires instead of running when the agent comes back. A file that cannot be read is said once
+/// and remembered in `passed_over`, not read again.
+pub fn take_in(
+    kept: &mut (impl Journal + Beats),
+    folder: &Path,
+    remote: &GitHub,
+    passed_over: &mut HashSet<String>,
+    now: Moment,
+) -> Result<Vec<String>, Trouble> {
+    let mut said = Vec::new();
+    for (who, at) in remote.heard()? {
+        kept.beat(&who, at)?;
+    }
+    let entries = kept.entries()?;
+    let known: HashSet<&str> = standing(&entries).into_iter().map(|s| s.job).collect();
+    for job in remote.asked()? {
+        if known.contains(job.as_str()) || passed_over.contains(&job) {
+            continue;
+        }
+        let asking = a_safe_name(&job).and_then(|()| remote.asking(&job));
+        let asking = match asking {
+            Ok(asking) => asking,
+            Err(Trouble::Refused { because, .. }) => {
+                said.push(format!("{job}: not taken in - {because}"));
+                passed_over.insert(job);
+                continue;
+            }
+            Err(trouble) => return Err(trouble),
+        };
+        let jobs = folder.join("jobs");
+        std::fs::create_dir_all(&jobs)
+            .and_then(|()| std::fs::write(jobs.join(format!("{job}.sh")), &asking.script))
+            .map_err(|e| Trouble::Unreachable {
+                because: e.to_string(),
+            })?;
+        kept.record(Entry {
+            job: job.clone(),
+            at: asking.asked,
+            what: Happened::Submitted {
+                by: asking.by.clone(),
+                start_by: asking.asked + asking.start_within,
+                may_run: asking.may_run,
+            },
+        })?;
+        said.push(format!(
+            "{job}: taken in, asked for by {} {} ago",
+            asking.by,
+            span(now.saturating_sub(asking.asked))
+        ));
+    }
+    Ok(said)
 }
 
 #[cfg(test)]

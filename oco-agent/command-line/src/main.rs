@@ -1,5 +1,6 @@
 //! oco-agent: the commons' system for coordinating work. This file only wires: it reads the declared
-//! command line, opens the folder where the journal, the beats and the jobs are kept, and hands over.
+//! command line, opens the folder where the journal, the beats and the jobs are kept - or the repository
+//! work is asked through - and hands over.
 
 mod commands;
 mod contract;
@@ -9,7 +10,10 @@ use argenv_resolve::*;
 use contract::{Command, Contract};
 use oco_agent_core::doing::Doing;
 use oco_agent_core::journal::Trouble;
+use oco_agent_core::leases::Beats;
+use oco_agent_github::GitHub;
 use oco_agent_journal_in_tad::InTad;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,8 +24,35 @@ fn seconds() -> u64 {
         .unwrap_or(0)
 }
 
-/// The runner's loop: one step every `every` seconds, saying what happened.
-fn run(folder: &Path, at_once: usize, lasts: u64, every: u64) -> Result<(), Trouble> {
+/// The repository named, with the token from OCO_AGENT_GITHUB_TOKEN, else lab-agent's token file.
+fn repository(repo: &str) -> Result<GitHub, Trouble> {
+    let token = match std::env::var("OCO_AGENT_GITHUB_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+    {
+        Some(token) => token,
+        None => {
+            let file = PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                .join(".config/lab-agent/token");
+            std::fs::read_to_string(&file).map_err(|e| Trouble::Unreachable {
+                because: format!(
+                    "no GitHub token: set OCO_AGENT_GITHUB_TOKEN, or keep one in {} ({e})",
+                    file.display()
+                ),
+            })?
+        }
+    };
+    Ok(GitHub::new(repo, token.trim().to_string()))
+}
+
+/// The runner's loop: one step every `every` seconds, taking work in every `listen_every`, saying what happened.
+fn run(
+    folder: &Path,
+    at_once: usize,
+    lasts: u64,
+    every: u64,
+    listen: Option<(GitHub, u64)>,
+) -> Result<(), Trouble> {
     let mut journal = InTad::open(folder)?;
     let beats = InTad::open(folder)?;
     // any number no earlier run used: the moment it began, to the millisecond
@@ -37,11 +68,25 @@ fn run(folder: &Path, at_once: usize, lasts: u64, every: u64) -> Result<(), Trou
         at_once,
         lasts,
     );
-    println!(
-        "oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}",
-        folder.display()
-    );
+    let mut passed_over = HashSet::new();
+    let mut last_taken_in = 0;
+    match &listen {
+        Some((remote, _)) => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}, listening to {}", folder.display(), remote.repo),
+        None => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}", folder.display()),
+    }
     loop {
+        let now = seconds();
+        if let Some((remote, listen_every)) = &listen {
+            if now.saturating_sub(last_taken_in) >= *listen_every {
+                match commands::take_in(&mut journal, folder, remote, &mut passed_over, now) {
+                    Ok(said) => said.iter().for_each(|s| println!("{s}")),
+                    Err(trouble) => {
+                        eprintln!("oco-agent: taking in: {}", commands::plainly(&trouble))
+                    }
+                }
+                last_taken_in = now;
+            }
+        }
         match doing.step(&mut journal, &beats, seconds()) {
             Ok(said) => said.iter().for_each(|s| println!("{s}")),
             Err(trouble) => eprintln!("oco-agent: {}", commands::plainly(&trouble)),
@@ -80,39 +125,87 @@ fn main() {
     let job = Contract::JOB
         .get_from_or_default(&resolved)
         .unwrap_or_default();
+    let via = Contract::VIA.get_from_or_default(&resolved);
     let now = seconds();
 
-    let answer = if command == Command::Run {
-        run(
-            &folder,
-            at_once,
-            lasts,
-            Contract::EVERY.get_from_or_default(&resolved).unwrap_or(2),
-        )
-        .map(|()| String::new())
-    } else {
-        InTad::open(&folder).and_then(|mut kept| match command {
-            Command::Beat => commands::beat(&mut kept, &who, now),
-            Command::Submit => {
-                let script =
-                    match Contract::FILE.get_from_or_default(&resolved) {
-                        Some(file) => Some(std::fs::read_to_string(&file).map_err(|e| {
-                            Trouble::Unreachable {
-                                because: format!("{file}: {e}"),
-                            }
-                        })?),
-                        None => None,
-                    };
-                let request = commands::Request {
+    let script = || -> Result<Option<String>, Trouble> {
+        match Contract::FILE.get_from_or_default(&resolved) {
+            Some(file) => {
+                std::fs::read_to_string(&file)
+                    .map(Some)
+                    .map_err(|e| Trouble::Unreachable {
+                        because: format!("{file}: {e}"),
+                    })
+            }
+            None => Ok(None),
+        }
+    };
+    let answer = match (command, via) {
+        (Command::Run, _) => {
+            let listen = match Contract::LISTEN.get_from_or_default(&resolved) {
+                Some(repo) => repository(&repo).map(|remote| {
+                    Some((
+                        remote,
+                        Contract::LISTEN_EVERY
+                            .get_from_or_default(&resolved)
+                            .unwrap_or(15),
+                    ))
+                }),
+                None => Ok(None),
+            };
+            listen
+                .and_then(|listen| {
+                    run(
+                        &folder,
+                        at_once,
+                        lasts,
+                        Contract::EVERY.get_from_or_default(&resolved).unwrap_or(2),
+                        listen,
+                    )
+                })
+                .map(|()| String::new())
+        }
+        (Command::Beat, Some(repo)) => repository(&repo).and_then(|mut remote| {
+            remote
+                .beat(&who, now)
+                .map(|()| format!("{who} is here, through {repo}\n"))
+        }),
+        (Command::Submit, Some(repo)) => repository(&repo).and_then(|mut remote| {
+            let script = script()?;
+            let may_run = Contract::MAY_RUN
+                .get_from_or_default(&resolved)
+                .unwrap_or(1800);
+            commands::submit_via(
+                &mut remote,
+                &commands::Request {
                     job: &job,
                     who: &who,
                     start_within: within,
-                    may_run: Contract::MAY_RUN
-                        .get_from_or_default(&resolved)
-                        .unwrap_or(1800),
+                    may_run,
                     script: script.as_deref(),
-                };
-                commands::submit(&mut kept, &folder, &request, now)
+                },
+                now,
+            )
+        }),
+        _ => InTad::open(&folder).and_then(|mut kept| match command {
+            Command::Beat => commands::beat(&mut kept, &who, now),
+            Command::Submit => {
+                let script = script()?;
+                let may_run = Contract::MAY_RUN
+                    .get_from_or_default(&resolved)
+                    .unwrap_or(1800);
+                commands::submit(
+                    &mut kept,
+                    &folder,
+                    &commands::Request {
+                        job: &job,
+                        who: &who,
+                        start_within: within,
+                        may_run,
+                        script: script.as_deref(),
+                    },
+                    now,
+                )
             }
             Command::Release => commands::release(&mut kept, &job, &who, now, within),
             Command::Standing => commands::where_things_stand(&kept, now, lasts),
@@ -124,7 +217,7 @@ fn main() {
                 lasts,
             ),
             Command::Run => unreachable!("handled above"),
-        })
+        }),
     };
     match answer {
         Ok(text) => print!("{text}"),

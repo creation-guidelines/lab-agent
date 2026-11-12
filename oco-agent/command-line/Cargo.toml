@@ -12,6 +12,7 @@ name = "oco-agent"
 path = "src/main.rs"
 
 [dependencies]
+oco-agent-github = { path = "../github" }
 oco-agent-core = { path = "../core" }
 oco-agent-journal-in-tad = { path = "../journal-in-tad" }
 argenv = "0.3"
