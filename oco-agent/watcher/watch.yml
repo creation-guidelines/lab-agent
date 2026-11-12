@@ -66,8 +66,8 @@ jobs:
             fi
             if [ -z "$asked_at" ] || [ $(( (now - asked_at) / 60 )) -ge "$EVERY" ]; then
               id="$now-probe"
-              cat > "jobs/$id.sh" <<PROBE
-          #!/bin/sh
+              printf '#!/bin/sh\n# lab: mode=queue timeout=60\n' > "jobs/$id.sh"
+              cat >> "jobs/$id.sh" <<PROBE
           # A probe from the watcher outside the machine (oco-agent/watcher): answering proves the lab takes work.
           set -eu
           export GH_TOKEN="\$(cat "\$HOME/.config/lab-agent/token")"
