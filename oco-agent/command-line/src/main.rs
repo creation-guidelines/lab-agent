@@ -70,6 +70,7 @@ fn run(
     );
     let mut passed_over = HashSet::new();
     let mut last_taken_in = 0;
+    let mut short_of_budget = false;
     match &listen {
         Some((remote, _)) => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}, listening to {}", folder.display(), remote.repo),
         None => println!("oco-agent: run {run}, doing at most {at_once} job(s) at once, kept in {}", folder.display()),
@@ -77,7 +78,26 @@ fn run(
     loop {
         let now = seconds();
         if let Some((remote, listen_every)) = &listen {
-            if now.saturating_sub(last_taken_in) >= *listen_every {
+            // the hour's GitHub budget is shared by everything on the account: when it runs low, take in less often
+            let low = remote.budget_left().is_some_and(|left| left < 500);
+            if low != short_of_budget {
+                short_of_budget = low;
+                match low {
+                    true => println!(
+                        "GitHub's budget is low ({} left this hour): taking work in every 2 min",
+                        remote.budget_left().unwrap_or(0)
+                    ),
+                    false => {
+                        println!("GitHub's budget is back: taking work in every {listen_every} s")
+                    }
+                }
+            }
+            let wait = if low {
+                (*listen_every).max(120)
+            } else {
+                *listen_every
+            };
+            if now.saturating_sub(last_taken_in) >= wait {
                 match commands::take_in(&mut journal, folder, remote, &mut passed_over, now) {
                     Ok(said) => said.iter().for_each(|s| println!("{s}")),
                     Err(trouble) => {
