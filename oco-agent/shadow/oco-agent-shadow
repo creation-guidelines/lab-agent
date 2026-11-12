@@ -1,0 +1,21 @@
+#!/bin/sh
+# oco-agent's shadow run: feeds lab-agent's newest log lines through oco-agent's rules, keeping its own
+# journal (tad tables) in ~/.local/share/oco-agent/shadow, and alerts urgently when lab-agent started
+# work oco-agent would have refused. Run by oco-agent-shadow.timer; it decides, it never acts.
+set -u
+here=${OCO_AGENT_SHADOW:-$HOME/.local/share/oco-agent/shadow}
+mkdir -p "$here"
+cursor=$here/journalctl.cursor
+if [ ! -f "$cursor" ]; then
+	# the first reading starts from now: what happened before is already judged (2026-11-11)
+	journalctl --user -u lab-agent -n 1 --cursor-file="$cursor" >/dev/null
+	echo "shadow: started watching lab-agent from now"
+	exit 0
+fi
+report=$(journalctl --user -u lab-agent -o short-iso --no-pager --cursor-file="$cursor" | oco-agent-replay "$here/journal")
+status=$?
+echo "$report"
+if [ "$status" = 3 ]; then
+	lab-agent notify --urgent --title "oco-agent shadow" "lab-agent started work oco-agent would have refused: $(echo "$report" | grep -A3 'would have refused' | tr '\n' ' ' | cut -c1-300)"
+fi
+[ "$status" = 0 ] || [ "$status" = 3 ]

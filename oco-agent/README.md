@@ -13,3 +13,6 @@ proven and takes over (then this repository takes its name). The design, and why
   log of 2026-11-11, it is the proof that the incident cannot happen here.
 - [`command-line/`](command-line/) - the program a driver types: `oco-agent beat | submit | release | standing | next`,
   its command line declared once with argenv. Today it speaks a driver's side; it does not yet run jobs.
+- [`shadow/`](shadow/) - the shadow run: every ten minutes a timer on the lab feeds lab-agent's newest log lines
+  through oco-agent's rules and alerts urgently if lab-agent started work oco-agent would have refused. It
+  decides; it never acts. Installed with `oco-agent/shadow/install`.

@@ -1,0 +1,7 @@
+[Unit]
+Description=oco-agent's shadow: lab-agent's newest work, judged by oco-agent's rules (it decides, never acts)
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/oco-agent-shadow
