@@ -1,0 +1,12 @@
+#!/bin/sh
+# Builds the replay, installs the shadow script, its service and its timer for this user, and starts it.
+set -eu
+cd "$(dirname "$0")/../.."
+cargo build -q --release -p oco-agent-replay
+install -Dm755 target/release/oco-agent-replay "$HOME/.local/bin/oco-agent-replay"
+install -Dm755 oco-agent/shadow/oco-agent-shadow "$HOME/.local/bin/oco-agent-shadow"
+install -Dm644 oco-agent/shadow/oco-agent-shadow.service "$HOME/.config/systemd/user/oco-agent-shadow.service"
+install -Dm644 oco-agent/shadow/oco-agent-shadow.timer "$HOME/.config/systemd/user/oco-agent-shadow.timer"
+systemctl --user daemon-reload
+systemctl --user enable --now oco-agent-shadow.timer
+echo "oco-agent's shadow is watching lab-agent: $(systemctl --user list-timers oco-agent-shadow.timer --no-legend | awk '{print "next at", $1, $2, $3}')"

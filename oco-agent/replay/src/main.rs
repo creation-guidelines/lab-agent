@@ -4,7 +4,9 @@
 //!
 //!     journalctl --user -u lab-agent -o short-iso | oco-agent-replay [FOLDER]
 //!
-//! With a FOLDER, the journal is kept there as tad tables, to read and to ask in SQL afterwards.
+//! With a FOLDER, the journal is kept there as tad tables and carries on from one reading to the next
+//! (the shadow run reads the newest lines every few minutes). It exits with 3 if oco-agent would have
+//! refused any start: the old agent did something the new one would not.
 
 use oco_agent_core::deciding::{next, Act};
 use oco_agent_core::journal::{state, Entry, Happened, InMemory, Journal, Moment, Outcome, State};
@@ -45,15 +47,37 @@ fn reason(stands: Option<&State>) -> &'static str {
     }
 }
 
-fn main() {
-    let folder = std::env::args().nth(1);
-    let mut journal: Box<dyn Journal> = match &folder {
-        Some(f) => Box::new(InTad::open(f).expect("a folder to keep the journal in")),
-        None => Box::new(InMemory::default()),
-    };
-    let (mut run, mut agreed, mut ended, mut parked) = (0u64, 0u64, 0u64, 0u64);
-    let mut refused: BTreeMap<&'static str, (u64, Vec<String>)> = BTreeMap::new();
-    for line in std::io::stdin().lock().lines().map_while(Result::ok) {
+/// What one reading of the log found.
+#[derive(Default, Debug)]
+pub struct Report {
+    pub restarts: u64,
+    pub agreed: u64,
+    pub ended: u64,
+    pub parked: u64,
+    pub refused: BTreeMap<&'static str, (u64, Vec<String>)>,
+}
+
+impl Report {
+    pub fn refused_in_all(&self) -> u64 {
+        self.refused.values().map(|r| r.0).sum()
+    }
+}
+
+/// Reads the lines through oco-agent's rules, writing what it agrees with into `journal`. The run of
+/// the agent carries on from the highest one the journal already holds, so readings join up.
+pub fn replay(lines: impl Iterator<Item = String>, journal: &mut dyn Journal) -> Report {
+    let mut report = Report::default();
+    let mut run = journal
+        .entries()
+        .expect("the journal answers")
+        .iter()
+        .filter_map(|e| match e.what {
+            Happened::Claimed { run } => Some(run),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    for line in lines {
         let Some(now) = line.split_whitespace().next().and_then(moment) else {
             continue;
         };
@@ -64,6 +88,7 @@ fn main() {
         };
         if line.contains("Started lab-agent") {
             run += 1;
+            report.restarts += 1;
             for act in next(
                 &journal.entries().expect("the journal answers"),
                 &drivers,
@@ -79,10 +104,15 @@ fn main() {
                             what: Happened::Parked(why),
                         })
                         .expect("a running job is parked");
-                    parked += 1;
+                    report.parked += 1;
                 }
             }
         } else if let Some(rest) = line.split("lab-agent: starting ").nth(1) {
+            // a reading that begins in the middle of a run of the agent calls that run 1, so that the
+            // next restart it sees counts as a new run and parks what was left running
+            if run == 0 {
+                run = 1;
+            }
             let job = rest.split_whitespace().next().unwrap_or("").to_string();
             let entries = journal.entries().expect("the journal answers");
             if state(&entries, &job).is_none() {
@@ -98,19 +128,18 @@ fn main() {
                     .expect("a new job is taken");
             }
             let entries = journal.entries().expect("the journal answers");
-            if next(&entries, &drivers, now, run.max(1), usize::MAX)
-                .contains(&Act::Start(job.clone()))
-            {
+            if next(&entries, &drivers, now, run, usize::MAX).contains(&Act::Start(job.clone())) {
                 journal
                     .record(Entry {
                         job,
                         at: now,
-                        what: Happened::Claimed { run: run.max(1) },
+                        what: Happened::Claimed { run },
                     })
                     .expect("a waiting job is claimed");
-                agreed += 1;
+                report.agreed += 1;
             } else {
-                let slot = refused
+                let slot = report
+                    .refused
                     .entry(reason(state(&entries, &job).as_ref()))
                     .or_default();
                 slot.0 += 1;
@@ -139,17 +168,28 @@ fn main() {
                         what: Happened::Finished(outcome),
                     })
                     .expect("a running job ends");
-                ended += 1;
+                report.ended += 1;
             }
         }
     }
+    report
+}
+
+fn main() {
+    let folder = std::env::args().nth(1);
+    let mut journal: Box<dyn Journal> = match &folder {
+        Some(f) => Box::new(InTad::open(f).expect("a folder to keep the journal in")),
+        None => Box::new(InMemory::default()),
+    };
+    let lines = std::io::stdin().lock().lines().map_while(Result::ok);
+    let report = replay(lines, journal.as_mut());
     println!(
-        "the old agent started {} jobs over {} run(s) of itself",
-        agreed + refused.values().map(|r| r.0).sum::<u64>(),
-        run.max(1)
+        "the old agent started {} jobs, and restarted {} time(s)",
+        report.agreed + report.refused_in_all(),
+        report.restarts
     );
-    println!("oco-agent would have started {agreed} of them ({ended} ran to their end; {parked} it would have parked at a restart)");
-    for (why, (count, examples)) in &refused {
+    println!("oco-agent would have started {} of them ({} ran to their end; {} it would have parked at a restart)", report.agreed, report.ended, report.parked);
+    for (why, (count, examples)) in &report.refused {
         println!("oco-agent would have refused {count}: {why}");
         for e in examples {
             println!("    {e}");
@@ -158,11 +198,18 @@ fn main() {
     if let Some(f) = folder {
         println!("the journal is kept in {f}");
     }
+    if report.refused_in_all() > 0 {
+        std::process::exit(3);
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::moment;
+    use super::*;
+
+    fn lines(text: &str) -> impl Iterator<Item = String> + '_ {
+        text.lines().map(str::to_string)
+    }
 
     #[test]
     fn a_stamp_is_a_moment() {
@@ -173,5 +220,45 @@ mod tests {
             "an hour ahead is the same moment"
         );
         assert_eq!(moment("not a stamp"), None);
+    }
+
+    #[test]
+    fn readings_join_up_and_a_replay_in_a_later_one_is_caught() {
+        let mut journal = InMemory::default();
+        let first = replay(
+            lines("2026-11-12T10:00:00+01:00 grig lab-agent[1]: lab-agent: starting job-a\n2026-11-12T10:01:00+01:00 grig lab-agent[1]: lab-agent: job-a finished: ok"),
+            &mut journal,
+        );
+        assert_eq!(
+            (first.agreed, first.ended, first.refused_in_all()),
+            (1, 1, 0)
+        );
+        let second = replay(
+            lines("2026-11-12T11:00:00+01:00 grig systemd[9]: Started lab-agent.\n2026-11-12T11:00:05+01:00 grig lab-agent[2]: lab-agent: starting job-a"),
+            &mut journal,
+        );
+        assert_eq!(
+            second.refused.get("it had already finished").map(|r| r.0),
+            Some(1),
+            "the later reading remembers job-a finished"
+        );
+    }
+
+    #[test]
+    fn a_reading_that_begins_mid_run_still_parks_at_the_next_restart() {
+        let mut journal = InMemory::default();
+        let report = replay(
+            lines("2026-11-12T10:00:00+01:00 grig lab-agent[1]: lab-agent: starting job-b\n2026-11-12T10:05:00+01:00 grig systemd[9]: Started lab-agent.\n2026-11-12T10:05:05+01:00 grig lab-agent[2]: lab-agent: starting job-b"),
+            &mut journal,
+        );
+        assert_eq!(report.parked, 1, "job-b was cut off by the restart");
+        assert_eq!(
+            report
+                .refused
+                .get("it was parked when the agent restarted")
+                .map(|r| r.0),
+            Some(1),
+            "and starting it again unasked is refused"
+        );
     }
 }
