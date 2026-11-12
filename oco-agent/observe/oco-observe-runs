@@ -1,0 +1,16 @@
+#!/bin/sh
+# The lab observes what has run in every place it holds, every quarter hour, and says what changed: a run
+# that fails now - urgently, to the author - and one that passes again. ocoeco observes; oco-agent's voice
+# says it; neither knows the other. The picture shows the same failure as a derived problem (the problems
+# lens: failing on main). OCO_SAY=echo shows what would be said, saying nothing.
+set -eu
+GITHUB_TOKEN=$(cat "$HOME/.config/lab-agent/token")
+export GITHUB_TOKEN
+out=$(ocoeco observe --root "$HOME/Projects" --only runs --out "$HOME/.local/share/ocoeco/observed")
+say=${OCO_SAY:-oco-agent say}
+printf '%s\n' "$out" | while IFS= read -r line; do
+    case "$line" in
+        "fails now: "*) $say "$line" --to author --urgent ;;
+        "passes again: "*) $say "$line" --to author ;;
+    esac
+done
