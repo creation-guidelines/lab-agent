@@ -1,0 +1,59 @@
+# The lens of now: what this record says is happening at this moment. With the tables declared in
+# tables.toml it is the lens this folder brings to ocoeco - kept beside the mark as lenses/now.toml -
+# so that what is being done is read off the journal as it is written, typed by nobody.
+
+[lens]
+id = "now"
+says = "What is happening on this machine at this moment: what is being done and for whom, what is asked and waits, what was cut off, who is here - read off oco-agent's journal as it is written."
+
+[[focus]]
+title = "being done now ({count})"
+sql = """
+WITH latest AS (SELECT job, arg_max(what, place) AS what, arg_max("at", place) AS since FROM journal GROUP BY job),
+     asked AS (SELECT job, arg_max("by", place) AS who FROM journal WHERE "by" IS NOT NULL GROUP BY job)
+SELECT latest.job, coalesce(asked.who, 'someone') AS who,
+       CAST(floor((extract(epoch FROM now()) - latest.since) / 60) AS INTEGER) AS minutes
+FROM latest LEFT JOIN asked ON asked.job = latest.job WHERE latest.what = 'claimed' ORDER BY latest.since
+"""
+line = "{job} - asked by {who}, being done for {minutes} min"
+
+[[focus]]
+title = "asked, not yet begun ({count})"
+sql = """
+WITH latest AS (SELECT job, arg_max(what, place) AS what, arg_max("at", place) AS since FROM journal GROUP BY job),
+     asked AS (SELECT job, arg_max("by", place) AS who FROM journal WHERE "by" IS NOT NULL GROUP BY job)
+SELECT latest.job, coalesce(asked.who, 'someone') AS who,
+       CAST(floor((extract(epoch FROM now()) - latest.since) / 60) AS INTEGER) AS minutes
+FROM latest LEFT JOIN asked ON asked.job = latest.job WHERE latest.what IN ('submitted', 'released') ORDER BY latest.since
+"""
+line = "{job} - asked by {who}, {minutes} min ago"
+
+[[focus]]
+title = "cut off when the agent restarted, in the last two days ({count})"
+sql = """
+WITH latest AS (SELECT job, arg_max(what, place) AS what, arg_max("at", place) AS since FROM journal GROUP BY job),
+     asked AS (SELECT job, arg_max("by", place) AS who FROM journal WHERE "by" IS NOT NULL GROUP BY job)
+SELECT latest.job, coalesce(asked.who, 'someone') AS who,
+       CAST(floor((extract(epoch FROM now()) - latest.since) / 3600) AS INTEGER) AS hours
+FROM latest LEFT JOIN asked ON asked.job = latest.job
+WHERE latest.what = 'parked' AND latest.since >= extract(epoch FROM now()) - 172800 ORDER BY latest.since
+"""
+line = "{job} - asked by {who}, {hours} h ago: it was not run again, and may be sent back to wait"
+
+[[focus]]
+title = "here ({count})"
+sql = """
+SELECT driver, CAST(floor((extract(epoch FROM now()) - "at") / 60) AS INTEGER) AS minutes
+FROM beats WHERE extract(epoch FROM now()) - "at" < 3600 ORDER BY "at" DESC
+"""
+line = "{driver} - {minutes} min ago"
+
+[[focus]]
+always = true
+sql = """
+SELECT count(*) FILTER (WHERE what = 'finished' AND outcome = 'done') AS well,
+       count(*) FILTER (WHERE what = 'finished' AND outcome <> 'done') AS not_well,
+       count(*) FILTER (WHERE what = 'parked') AS cut_off
+FROM journal WHERE "at" >= extract(epoch FROM now()) - 86400
+"""
+line = "in the last day: {well} jobs ended well, {not_well} did not, {cut_off} were cut off"

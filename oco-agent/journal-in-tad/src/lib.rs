@@ -13,6 +13,29 @@ use std::time::{Duration, SystemTime};
 
 const TABLES: &str = include_str!("../tables.toml");
 
+/// The lens of now, without its tables: what it says of itself, and what it brings into focus. Its
+/// tables are `TABLES` - one declaration, so the lens cannot say other than what is kept.
+const NOW: &str = include_str!("../now.toml");
+
+/// What this folder is, said in the commons' way (a mark, `oco.toml`): a place - this machine's own
+/// record of what happens on it. Whose it is and which machine are read off the surroundings.
+fn mark() -> String {
+    let named = |found: Option<String>, otherwise: &str| {
+        found
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| otherwise.to_string())
+    };
+    let whose = named(std::env::var("USER").ok(), "someone");
+    let machine = named(
+        std::fs::read_to_string("/proc/sys/kernel/hostname").ok(),
+        "here",
+    );
+    format!(
+        "schema = 1\n\n[project]\nid = \"{whose}/{machine}\"\nname = \"{machine}: what happens on this machine, as oco-agent writes it\"\nkind = \"device-lab\"\nparent = \"{whose}\"\n\n[exports]\njournal = \"data/journal.json\"\nbeats = \"data/beats.json\"\nsaid = \"data/said.json\"\n"
+    )
+}
+
 /// How long a writer may hold its turn before it is taken to have died.
 const A_TURN_LASTS: Duration = Duration::from_secs(30);
 
@@ -37,6 +60,25 @@ impl InTad {
         // the declaration is this adapter's own: a folder made by an older one is brought up to it
         if std::fs::read_to_string(&tables).ok().as_deref() != Some(TABLES) {
             std::fs::write(&tables, TABLES).map_err(unreachable)?;
+        }
+        // the folder says what it is, in the commons' way: a place that brings the lens of now. The lens
+        // is this adapter's own, like the declaration it is made of, and is brought up to it; the mark is
+        // written only where there is none - one a person wrote stands. Each table it names is there to
+        // be read, though nothing has happened yet.
+        let lens = format!("{TABLES}\n{NOW}");
+        std::fs::create_dir_all(folder.join("lenses")).map_err(unreachable)?;
+        let kept = folder.join("lenses").join("now.toml");
+        if std::fs::read_to_string(&kept).ok().as_deref() != Some(lens.as_str()) {
+            std::fs::write(&kept, &lens).map_err(unreachable)?;
+        }
+        if !folder.join("oco.toml").exists() {
+            std::fs::write(folder.join("oco.toml"), mark()).map_err(unreachable)?;
+        }
+        for table in ["journal", "beats", "said"] {
+            let rows = folder.join("data").join(format!("{table}.json"));
+            if !rows.exists() {
+                std::fs::write(&rows, "").map_err(unreachable)?;
+            }
         }
         let declaration = toml::from_str(TABLES).map_err(unreachable)?;
         Ok(InTad {
