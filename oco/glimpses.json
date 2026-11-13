@@ -46,3 +46,4 @@
 {"id":"g-20261112-221959","at":"2026-11-12T22:19:59Z","by":"claude","kind":"feat","summary":"oco-agent says what newly came into view, every five minutes"}
 {"id":"g-20261113-011440","at":"2026-11-13T01:14:40Z","by":"claude","kind":"fix","summary":"no git address on the lab holds a token; a wider search than the claim"}
 {"id":"g-20261113-011701","at":"2026-11-13T01:17:01Z","by":"claude","kind":"feat","summary":"the voice reads what the author's own observatory observed"}
+{"id":"g-20261113-074759","at":"2026-11-13T07:47:59Z","by":"Claude","kind":"docs","summary":"the author's driving waits on a surface that speaks for itself"}
