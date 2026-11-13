@@ -1,5 +1,6 @@
 //! Speaking: what happened goes back to the repository work was asked through - the journal and each
-//! job's log, on its `spoken` branch - written only when something changed: the journal at most every
+//! job's log, on its `spoken` branch, with the mark that says what this record is - written only when
+//! something changed: the journal at most every
 //! ten seconds, a running job's log at most every minute, a finished job's log at once. Logs go before
 //! the journal, so a driver who reads that a job ended finds its log there too. Only jobs this run has
 //! done are spoken, so a restarted runner does not pour out old logs.
@@ -14,6 +15,8 @@ const LOG_TAIL: usize = 512 * 1024;
 
 #[derive(Default)]
 pub struct Speaking {
+    /// What the record says it is (its mark), as last spoken.
+    mark: Option<String>,
     journal: Option<String>,
     journal_at: u64,
     /// Jobs this run has seen running, until their last words are spoken.
@@ -51,6 +54,14 @@ impl Speaking {
             }
             if !still {
                 self.doing.remove(&job);
+            }
+        }
+        // what the record is travels with it: its mark, spoken whenever it is not what was last spoken -
+        // so that a copy brought elsewhere is this place, and is not named for wherever it arrives
+        if let Ok(mark) = std::fs::read_to_string(folder.join("oco.toml")) {
+            if self.mark.as_deref() != Some(mark.as_str()) {
+                remote.speak("oco-agent/oco.toml", mark.as_bytes(), "what this record is")?;
+                self.mark = Some(mark);
             }
         }
         let text = match std::fs::read_to_string(folder.join("data/journal.json")) {
