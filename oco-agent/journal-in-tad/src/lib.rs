@@ -17,22 +17,22 @@ const TABLES: &str = include_str!("../tables.toml");
 /// tables are `TABLES` - one declaration, so the lens cannot say other than what is kept.
 const NOW: &str = include_str!("../now.toml");
 
-/// What this folder is, said in the commons' way (a mark, `oco.toml`): a place - this machine's own
-/// record of what happens on it. Whose it is and which machine are read off the surroundings.
+/// What this folder is, said in the commons' way (a mark, `oco.toml`): a place - oco-agent's own record
+/// of what happens on a machine. The first part of a place's id says where it is held: for this one,
+/// the machine - written so that it cannot be taken for an owner elsewhere (such a name has no dot).
 fn mark() -> String {
-    let named = |found: Option<String>, otherwise: &str| {
-        found
-            .map(|n| n.trim().to_string())
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| otherwise.to_string())
+    let machine = std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|n| n.trim().to_string())
+        .ok()
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "here".to_string());
+    let held_by = if machine.contains('.') {
+        machine.clone()
+    } else {
+        format!("{machine}.local")
     };
-    let whose = named(std::env::var("USER").ok(), "someone");
-    let machine = named(
-        std::fs::read_to_string("/proc/sys/kernel/hostname").ok(),
-        "here",
-    );
     format!(
-        "schema = 1\n\n[project]\nid = \"{whose}/{machine}\"\nname = \"{machine}: what happens on this machine, as oco-agent writes it\"\nkind = \"device-lab\"\nparent = \"{whose}\"\n\n[exports]\njournal = \"data/journal.json\"\nbeats = \"data/beats.json\"\nsaid = \"data/said.json\"\n"
+        "schema = 1\n\n[project]\nid = \"{held_by}/oco-agent\"\nname = \"oco-agent on {machine}: what happens there, as it is written\"\nkind = \"device-lab\"\nparent = \"{held_by}\"\n\n[exports]\njournal = \"data/journal.json\"\nbeats = \"data/beats.json\"\nsaid = \"data/said.json\"\n"
     )
 }
 

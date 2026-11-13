@@ -22,6 +22,11 @@ fn the_folder_is_a_place_that_brings_the_lens_of_now() {
     // a mark: which place this is, and where each of its tables is kept - each there to be read
     let mark = read(d.join("oco.toml"));
     let id = mark["project"]["id"].as_str().unwrap();
+    // held by the machine, and named for the program whose record it is: a name no owner elsewhere can have
+    assert!(
+        id.ends_with("/oco-agent") && id.split('/').next().unwrap().contains('.'),
+        "{id}"
+    );
     assert_eq!(
         (id.split('/').count(), mark["project"]["kind"].as_str()),
         (2, Some("device-lab")),

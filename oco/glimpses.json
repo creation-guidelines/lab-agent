@@ -49,3 +49,4 @@
 {"id":"g-20261113-074759","at":"2026-11-13T07:47:59Z","by":"Claude","kind":"docs","summary":"the author's driving waits on a surface that speaks for itself"}
 {"id":"g-20261113-075234","at":"2026-11-13T07:52:34Z","by":"Claude","kind":"docs","summary":"the token item waits only on what is left"}
 {"id":"g-20261113-122744","at":"2026-11-13T12:27:44Z","by":"claude","kind":"feat","summary":"oco-agent's record says what it is: a place that brings the lens of now","advances":"backlog:the-agent-says-what-it-is"}
+{"id":"g-20261113-153837","at":"2026-11-13T15:38:37Z","by":"claude","kind":"fix","summary":"oco-agent's record is held by the machine: MACHINE.local/oco-agent","advances":"backlog:the-agent-says-what-it-is"}
