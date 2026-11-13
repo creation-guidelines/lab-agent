@@ -62,13 +62,37 @@ impl Seen {
     }
 }
 
+/// Where what a repository spoke is kept on this machine: with the programs' own data, a folder for
+/// each repository - so that it is a place here, to stand in and to look through, and not a copy thrown
+/// away when the command ends.
+fn seen_at(repo: &str) -> PathBuf {
+    let kept = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("share"))
+        })
+        .unwrap_or_else(std::env::temp_dir);
+    kept.join(format!("oco-agent-seen-{}", repo.replace('/', "-")))
+}
+
 fn spoken_journal(remote: &GitHub) -> Result<Vec<Entry>, Trouble> {
-    let copy = std::env::temp_dir().join(format!("oco-agent-seen-{}", std::process::id()));
-    let seen = InTad::open(&copy)?;
-    let text = remote.spoken("oco-agent/journal.json")?.unwrap_or_default();
-    std::fs::write(copy.join("data/journal.json"), text).map_err(|e| Trouble::Unreachable {
+    let unreachable = |e: std::io::Error| Trouble::Unreachable {
         because: e.to_string(),
-    })?;
+    };
+    let copy = seen_at(&remote.repo);
+    std::fs::create_dir_all(&copy).map_err(unreachable)?;
+    // the record's own mark travels with it: the copy is that place. Where none was spoken the copy
+    // says nothing of what it is - it is not this machine's record, and is not named as if it were
+    let mark = remote.spoken("oco-agent/oco.toml")?;
+    if let Some(mark) = &mark {
+        std::fs::write(copy.join("oco.toml"), mark).map_err(unreachable)?;
+    }
+    let seen = InTad::open(&copy)?;
+    if mark.is_none() {
+        let _ = std::fs::remove_file(copy.join("oco.toml"));
+    }
+    let text = remote.spoken("oco-agent/journal.json")?.unwrap_or_default();
+    std::fs::write(copy.join("data/journal.json"), text).map_err(unreachable)?;
     seen.entries()
 }
 
