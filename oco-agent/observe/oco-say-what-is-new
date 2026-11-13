@@ -10,7 +10,7 @@ observed="$at/the-authors-observatory"
 [ -d "$observed/.git" ] || git clone -q --depth 1 https://github.com/marshall-oco/marshall-oco.github.io "$observed"
 git -C "$observed" fetch -q --depth 1 origin main && git -C "$observed" reset -q --hard origin/main
 say=${OCO_SAY:-oco-agent say}
-for lens in ${OCO_LENSES:-work problems}; do
+for lens in ${OCO_LENSES:-work signs}; do
     ocoeco focus "$lens" --observed "$observed/data" --since "$at/said/$lens.json" | while IFS= read -r line; do
         $say "$line" --to author
     done
