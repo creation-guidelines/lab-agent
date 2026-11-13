@@ -44,3 +44,4 @@
 {"id":"g-20261112-203340","at":"2026-11-12T20:33:40Z","by":"claude","kind":"docs","summary":"the switch on the board as it stands; three finished items closed with evidence"}
 {"id":"g-20261112-203658","at":"2026-11-12T20:36:58Z","by":"claude","kind":"docs","summary":"work in progress made honest: one view awaited once, not three times"}
 {"id":"g-20261112-221959","at":"2026-11-12T22:19:59Z","by":"claude","kind":"feat","summary":"oco-agent says what newly came into view, every five minutes"}
+{"id":"g-20261113-011440","at":"2026-11-13T01:14:40Z","by":"claude","kind":"fix","summary":"no git address on the lab holds a token; a wider search than the claim"}
