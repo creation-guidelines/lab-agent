@@ -1,6 +1,49 @@
 # Changelog
 
 All notable changes to lab-agent are documented here.
+## [0.1.54]
+
+
+### Bug Fixes
+- Lab-agent's voice is back on 0.1.53; its service limit in the right section ([#157](https://github.com/creation-guidelines/lab-agent/pull/157)) ([14a6d3b])
+- Oco-agent restarts between jobs when asked, never in the middle of one ([#163](https://github.com/creation-guidelines/lab-agent/pull/163)) ([0a2c289])
+- The glimpses' links to milestones name the table ([#166](https://github.com/creation-guidelines/lab-agent/pull/166)) ([fa02329])
+- The pulse is the watcher; a best-effort GitHub schedule no longer pretends to watch ([#170](https://github.com/creation-guidelines/lab-agent/pull/170)) ([5c2d127])
+- No git address on the lab holds a token; a wider search than the claim ([#175](https://github.com/creation-guidelines/lab-agent/pull/175)) ([1ea1b6f])
+- Oco-agent's record is held by the machine: MACHINE.local/oco-agent ([#180](https://github.com/creation-guidelines/lab-agent/pull/180)) ([0da2199])
+- The voice looks through the lens of signs ([#182](https://github.com/creation-guidelines/lab-agent/pull/182)) ([2150afc])
+- The voice carries urgency as the lens says; observing only observes ([#185](https://github.com/creation-guidelines/lab-agent/pull/185)) ([c1d023d])
+
+
+### Documentation
+- The pulse lives: the lab is watched by a dead man's switch outside GitHub ([#160](https://github.com/creation-guidelines/lab-agent/pull/160)) ([33e2f21])
+- Lab-agent's items in progress say who holds them and what is next ([#164](https://github.com/creation-guidelines/lab-agent/pull/164)) ([60a93cd])
+- A source two decisions cited is recorded: the link held nowhere ([#165](https://github.com/creation-guidelines/lab-agent/pull/165)) ([e3d997f])
+- Decisions that refine others say so as a relation ([#167](https://github.com/creation-guidelines/lab-agent/pull/167)) ([f58b9a3])
+- The lab's problems raised: in view until each has a countermeasure ([#168](https://github.com/creation-guidelines/lab-agent/pull/168)) ([e6a4538])
+- The token rotated, sealed on its way; the old kept until revoked ([#169](https://github.com/creation-guidelines/lab-agent/pull/169)) ([cc40da9])
+- The switch on the board as it stands; three finished items closed with evidence ([#172](https://github.com/creation-guidelines/lab-agent/pull/172)) ([7ef5486])
+- Work in progress made honest: one view awaited once, not three times ([#173](https://github.com/creation-guidelines/lab-agent/pull/173)) ([3ca1199])
+- The author's driving waits on a surface that speaks for itself ([#177](https://github.com/creation-guidelines/lab-agent/pull/177)) ([c2de9c8])
+- The token item waits only on what is left ([#178](https://github.com/creation-guidelines/lab-agent/pull/178)) ([2ca3d90])
+- A sign, said the new way: oco-agent is not released ([#183](https://github.com/creation-guidelines/lab-agent/pull/183)) ([bd2de47])
+- Oco-agent is not released by intent: what it waits on is the switch ([#186](https://github.com/creation-guidelines/lab-agent/pull/186)) ([496a051])
+- The switch waits on the author trying the way in ([#187](https://github.com/creation-guidelines/lab-agent/pull/187)) ([e85e0f1])
+
+
+### Features
+- The pulse: oco-agent's sign of life to a dead man's switch outside ([#159](https://github.com/creation-guidelines/lab-agent/pull/159)) ([62345db])
+- Oco-agent's voice: drivers say things to one another, carried to the phone ([#162](https://github.com/creation-guidelines/lab-agent/pull/162)) ([aecb00c])
+- The lab hears what fails: observed every quarter hour, said aloud ([#171](https://github.com/creation-guidelines/lab-agent/pull/171)) ([9e9f08d])
+- Oco-agent says what newly came into view, every five minutes ([#174](https://github.com/creation-guidelines/lab-agent/pull/174)) ([b0b17f3])
+- The voice reads what the author's own observatory observed ([#176](https://github.com/creation-guidelines/lab-agent/pull/176)) ([c5e77db])
+- Oco-agent's record says what it is: a place that brings the lens of now ([#179](https://github.com/creation-guidelines/lab-agent/pull/179)) ([b505510])
+- The record travels whole: its mark is spoken, the copy is a place ([#181](https://github.com/creation-guidelines/lab-agent/pull/181)) ([8ed716f])
+- Every job, shaped once, in the lens of now ([#184](https://github.com/creation-guidelines/lab-agent/pull/184)) ([933c54c])
+- The lab asks the observatory to observe what has run, and observes nothing itself ([#188](https://github.com/creation-guidelines/lab-agent/pull/188)) ([27468fd])
+
+
+
 ## [0.1.53]
 
 
