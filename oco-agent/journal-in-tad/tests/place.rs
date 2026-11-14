@@ -49,16 +49,26 @@ fn the_folder_is_a_place_that_brings_the_lens_of_now() {
     );
     let parts = lens["focus"].as_array().unwrap();
     assert!(
-        parts.len() >= 4
-            && parts
-                .iter()
-                .all(|p| p.get("sql").is_some() && p.get("line").is_some())
+        parts.len() >= 4 && parts.iter().all(|p| p.get("sql").is_some()),
+        "every part asks something"
     );
     assert!(
-        parts[0]["sql"]
-            .as_str()
-            .unwrap()
-            .contains("latest.what = 'claimed'"),
+        parts
+            .iter()
+            .filter(|p| p.get("title").is_some())
+            .all(|p| p.get("line").is_some()),
+        "every part with a heading lays out a line"
+    );
+    let doing = parts
+        .iter()
+        .find(|p| {
+            p.get("title")
+                .and_then(|t| t.as_str())
+                .is_some_and(|t| t.starts_with("being done now"))
+        })
+        .unwrap();
+    assert!(
+        doing["sql"].as_str().unwrap().contains("what = 'claimed'"),
         "what is being done is what was claimed and has not ended"
     );
 }
