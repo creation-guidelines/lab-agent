@@ -58,3 +58,4 @@
 {"id":"g-20261114-002700","at":"2026-11-14T00:27:00Z","by":"claude","kind":"docs","summary":"oco-agent is not released by intent: what it waits on is the switch"}
 {"id":"g-20261114-073532","at":"2026-11-14T07:35:32Z","by":"claude","kind":"docs","summary":"the switch waits on the author trying the way in","advances":"backlog:switch-drivers-move"}
 {"id":"g-20261114-090722","at":"2026-11-14T09:07:22Z","by":"claude","kind":"feat","summary":"the lab asks the observatory to observe what has run, and observes nothing itself"}
+{"id":"g-20261114-215119","at":"2026-11-14T21:51:19Z","by":"claude","kind":"docs","summary":"wait does not see a long job end: said as a sign","touches":"problems:wait-does-not-see-a-long-job-end","where":"open-commons-observatory/ocoeco/decisions:2026-11-14-the-graph-once-in-a-look"}
