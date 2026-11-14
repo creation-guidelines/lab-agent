@@ -1,16 +1,18 @@
 #!/bin/sh
-# The lab observes what has run in every place it holds, every quarter hour, and says what changed: a run
-# that fails now - urgently, to the author - and one that passes again. ocoeco observes; oco-agent's voice
-# says it; neither knows the other. The picture shows the same failure as a derived problem (the problems
-# lens: failing on main). OCO_SAY=echo shows what would be said, saying nothing.
+# The lab observes what has run in every place it holds, every quarter hour, and says what newly comes into
+# view in the lens of signs over it: a run that fails on main - urgently, because the lens says so - and one
+# no longer in view there. What a run's ending means is the lens's to say: ocoeco observes and brings it into
+# focus; oco-agent's voice carries it; none decides what another does. OCO_SAY=echo shows what would be
+# said, saying nothing.
 set -eu
 GITHUB_TOKEN=$(cat "$HOME/.config/lab-agent/token")
 export GITHUB_TOKEN
-out=$(ocoeco observe --root "$HOME/Projects" --only runs --out "$HOME/.local/share/ocoeco/observed")
+at="$HOME/.local/share/ocoeco"
+ocoeco observe --root "$HOME/Projects" --only runs --out "$at/observed" >/dev/null
 say=${OCO_SAY:-oco-agent say}
-printf '%s\n' "$out" | while IFS= read -r line; do
+ocoeco focus signs --observed "$at/observed" --since "$at/said/runs.json" | while IFS= read -r line; do
     case "$line" in
-        "fails now: "*) $say "$line" --to author --urgent ;;
-        "passes again: "*) $say "$line" --to author ;;
+        "urgent: "*) $say "${line#urgent: }" --to author --urgent ;;
+        *) $say "$line" --to author ;;
     esac
 done
