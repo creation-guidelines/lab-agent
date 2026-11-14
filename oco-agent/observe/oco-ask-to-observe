@@ -1,0 +1,9 @@
+#!/bin/sh
+# The lab asks the author's observatory to observe what has run, every quarter hour. The observatory is the one
+# that observes - its record keeps what it saw - and the lab's voice says what newly comes into view there,
+# urgently where the lens of signs says so. The lab observed on its own before, because the observatory's own
+# schedule was too seldom to hear in time that something broke; now it only asks, and nothing is seen twice.
+set -eu
+GH_TOKEN=$(cat "$HOME/.config/lab-agent/token")
+export GH_TOKEN
+gh workflow run observe.yml --repo marshall-oco/marshall-oco.github.io -f only=runs

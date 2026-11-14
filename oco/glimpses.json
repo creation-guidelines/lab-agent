@@ -57,3 +57,4 @@
 {"id":"g-20261114-002342","at":"2026-11-14T00:23:42Z","by":"claude","kind":"fix","summary":"the voice carries urgency as the lens says; observing only observes"}
 {"id":"g-20261114-002700","at":"2026-11-14T00:27:00Z","by":"claude","kind":"docs","summary":"oco-agent is not released by intent: what it waits on is the switch"}
 {"id":"g-20261114-073532","at":"2026-11-14T07:35:32Z","by":"claude","kind":"docs","summary":"the switch waits on the author trying the way in","advances":"backlog:switch-drivers-move"}
+{"id":"g-20261114-090722","at":"2026-11-14T09:07:22Z","by":"claude","kind":"feat","summary":"the lab asks the observatory to observe what has run, and observes nothing itself"}
