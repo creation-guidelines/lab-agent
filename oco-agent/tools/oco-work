@@ -31,6 +31,9 @@
 #   settled REPO WORKFLOW      wait until none of a workflow's runs is under way, and say how the latest ended
 #   shown FILE...              show files to the driver who asked - a page, a screenshot: each is put, under
 #                              its own name, where the driver brings it from (brought NAME, on its side)
+#   said [WORDS]               say WORDS in the window - ocoeco, said with no command: a mark, a lens, an
+#                              entry by its name with what it asks on standard input, back, up - and land
+#                              what was entered, in the place it was kept in (window WORDS, on a driver's side)
 #
 # To compare before and after a change to a program: look before with the changed files already in place
 # and the program as it was - looks_kept after the changes, before `tried` - so that only the program
@@ -299,4 +302,22 @@ turn() {
     }
     (cd "$there" && ocoeco glimpse "a turn entered as it was said: $said" --kind docs >/dev/null && ocoeco commit >/dev/null && git push -q) || stop "the turn was not kept"
     echo "  the turn is entered: $id"
+}
+
+# what is said in the window - where an entry is made by saying its name and what it asks - is landed as it
+# is entered: the window says where it was kept, and this lands that place
+said() {
+    local out kept summary
+    out=$(cd "$OBSERVATORY" && ocoeco "$@" 2>&1)
+    echo "$out"
+    kept=$(echo "$out" | sed -n 's/^entered: \([^ ]*\) | .*/\1/p' | head -1)
+    [ -n "$kept" ] || return 0
+    summary=$(echo "$out" | sed -n 's/^entered: [^ ]* | //p' | head -1 | cut -c1-88)
+    cd "$PLACES/$kept" || stop "what was entered is kept in $kept, and no such place is held"
+    _oco_place="$PLACES/$kept"
+    if [ "$kept" = "$CONVERSATION" ]; then
+        straight "$summary"
+    else
+        git checkout -q -b "said/$(date +%s)" && landit "$summary"
+    fi
 }
