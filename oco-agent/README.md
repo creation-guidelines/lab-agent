@@ -16,7 +16,9 @@ proven and takes over (then this repository takes its name). The design, and why
   a job is claimed before it starts, every process it starts carries its mark and ends with it.
 - [`github/`](github/) - oco-agent on GitHub, the only part that knows it: work asked for as files under
   `oco-agent/jobs` in a repository (a top line, read only at the top, says who asked, when, and the limits),
-  drivers' beats as its Actions variables. A driver asks with `--via OWNER/REPO`; the runner takes in with
+  drivers' beats as its Actions variables - and, for a driver whose workspace lets it only read the
+  repository and push to it, as small files under `oco-agent/beats`, said with git alone like its askings;
+  an asking is itself a beat. A driver asks with `--via OWNER/REPO`; the runner takes in with
   `run --listen OWNER/REPO`. What happened is spoken back to the same repository's `spoken` branch -
   the journal, and each job's log - so a driver anywhere can `standing`, `log` and `wait` with `--via`.
 - [`shadow/`](shadow/) - the shadow run: every ten minutes a timer on the lab feeds lab-agent's newest log lines

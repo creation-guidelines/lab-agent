@@ -1,8 +1,14 @@
 //! oco-agent on GitHub: work is asked for as files in a repository (under `oco-agent/jobs`), and
 //! drivers' beats are kept as the repository's Actions variables, so a beat writes no commit. Only
 //! this crate knows GitHub; the token travels in a header, never in an address.
+//!
+//! What a driver needs is to read one repository and to put a file in it. Where its workspace lets the
+//! repository be pushed to and its API only be read, both of what a driver says - what it asks, and that
+//! it is still here - are said with git alone (`pushed`): the asking as its file, the beat as a small
+//! file beside the asked work, which the lab hears as it hears the variables.
 
 pub mod asking;
+pub mod pushed;
 
 pub use asking::Asking;
 use base64::Engine;
@@ -18,6 +24,9 @@ pub const ASKED: &str = "oco-agent/jobs";
 /// The branch what happened is written to, so the history of asking, on main, stays clean.
 pub const SPOKEN: &str = "spoken";
 const BEAT: &str = "OCO_AGENT_BEAT_";
+/// Where a driver who speaks with git alone says it is still here: one small file for each, beside the
+/// asked work.
+pub const BEATS: &str = "oco-agent/beats";
 const API: &str = "https://api.github.com";
 
 /// One repository, as oco-agent uses it. Listings are asked for conditionally: GitHub answers "not
@@ -38,6 +47,9 @@ pub struct GitHub {
     texts: RefCell<HashMap<String, (String, String)>>,
     /// Whether the spoken branch is known to exist.
     has_spoken: Cell<bool>,
+    /// When the repository's Actions were last found closed from here: a beat is then said with git, and
+    /// the variables are not asked for again for a while.
+    no_variables: Cell<Option<Instant>>,
     /// Listings GitHub said do not exist, and when: not asked again for two minutes (a "not found" is
     /// charged to the budget, and carries no fingerprint to ask conditionally with).
     missing: RefCell<HashMap<String, Instant>>,
@@ -64,6 +76,35 @@ fn said(e: ureq::Error) -> Trouble {
     }
 }
 
+/// Whether the request itself was refused - by GitHub, or by the way out to it - and not for a spent
+/// budget: a spent budget returns by itself, a refusal does not, and what was to be said goes another way.
+fn refused(code: u16, response: &ureq::Response) -> bool {
+    code == 403 && response.header("X-RateLimit-Remaining") != Some("0")
+}
+
+/// A job of that name was asked for before: it is not asked for again.
+fn asked_already(job: &str) -> Trouble {
+    Trouble::Refused {
+        job: job.into(),
+        because: "it cannot be asked for again: it was asked for already".into(),
+    }
+}
+
+/// The file that keeps the beat of a driver who speaks with git alone.
+fn beat_file(driver: &str) -> String {
+    let name: String = driver
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("{BEATS}/{name}.json")
+}
+
 /// The variable that keeps a driver's beat.
 fn variable(driver: &str) -> String {
     let name: String = driver
@@ -81,8 +122,11 @@ fn variable(driver: &str) -> String {
 
 impl GitHub {
     pub fn new(repo: &str, token: String) -> GitHub {
+        // a driver's workspace may have its own way out - a proxy named by the environment, which may
+        // also be where the credential for the repository is attached: then that way is taken
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(20))
+            .try_proxy_from_env(true)
             .build();
         GitHub {
             repo: repo.to_string(),
@@ -95,6 +139,7 @@ impl GitHub {
             shas: RefCell::default(),
             texts: RefCell::default(),
             has_spoken: Cell::default(),
+            no_variables: Cell::default(),
         }
     }
 
@@ -156,6 +201,60 @@ impl GitHub {
                     .insert(path.to_string(), Instant::now());
                 Ok(None)
             }
+            // a way out that passes only a repository's files refuses its Actions: there is nothing to
+            // list there from here, for a while
+            Err(ureq::Error::Status(code, r))
+                if refused(code, &r) && path.starts_with("actions/") =>
+            {
+                self.no_variables.set(Some(Instant::now()));
+                Ok(None)
+            }
+            Err(e) => Err(said(e)),
+        }
+    }
+
+    /// Whether the repository's Actions were lately found closed from here.
+    fn variables_closed(&self) -> bool {
+        self.no_variables
+            .get()
+            .is_some_and(|since| since.elapsed() < Duration::from_secs(600))
+    }
+
+    /// Says a driver's beat as a variable - no commit; false where the repository's Actions are closed
+    /// from here, and the beat is to be said another way.
+    fn beat_as_variable(&self, driver: &str, at: Moment, value: &str) -> Result<bool, Trouble> {
+        if self.variables_closed() {
+            return Ok(false);
+        }
+        let name = variable(driver);
+        let written = match self
+            .call("GET", &format!("actions/variables/{name}"))
+            .call()
+        {
+            Ok(r) => {
+                let known: Value = r.into_json().map_err(unreachable)?;
+                // a beat never goes back: an older one than what is known is not written
+                if known["value"]
+                    .as_str()
+                    .and_then(beat_of)
+                    .is_some_and(|(_, last)| last >= at)
+                {
+                    return Ok(true);
+                }
+                self.call("PATCH", &format!("actions/variables/{name}"))
+                    .send_json(json!({ "name": name, "value": value }))
+            }
+            Err(ureq::Error::Status(404, _)) => self
+                .call("POST", "actions/variables")
+                .send_json(json!({ "name": name, "value": value })),
+            Err(e) => Err(e),
+        };
+        match written {
+            Ok(_) => Ok(true),
+            Err(ureq::Error::Status(code, r)) if refused(code, &r) => {
+                self.no_variables.set(Some(Instant::now()));
+                Ok(false)
+            }
             Err(e) => Err(said(e)),
         }
     }
@@ -205,9 +304,19 @@ impl GitHub {
             .send_json(body)
         {
             Ok(_) => Ok(()),
-            Err(ureq::Error::Status(422, _)) => Err(Trouble::Refused {
-                job: asking.job.clone(),
-                because: "it cannot be asked for again: it was asked for already".into(),
+            Err(ureq::Error::Status(422, _)) => Err(asked_already(&asking.job)),
+            // the repository's API takes no write from here: the asking is said with git alone
+            Err(ureq::Error::Status(code, r)) if refused(code, &r) => pushed::push(
+                &self.repo,
+                &self.branch,
+                &format!("{ASKED}/{}.sh", asking.job),
+                asking.to_text().as_bytes(),
+                &format!("asked: {} (by {})", asking.job, asking.by),
+                true,
+            )
+            .map_err(|not| match not {
+                pushed::NotPushed::AlreadyThere => asked_already(&asking.job),
+                pushed::NotPushed::Because(why) => unreachable(why),
             }),
             Err(e) => Err(said(e)),
         }
@@ -292,7 +401,13 @@ impl GitHub {
 
     /// What was spoken at `path`, asked for only if it changed since the last answer; nothing, if nothing was.
     pub fn spoken(&self, path: &str) -> Result<Option<String>, Trouble> {
-        let key = format!("contents/{path}?ref={SPOKEN}");
+        self.text_at(path, SPOKEN)
+    }
+
+    /// The file at `path` on `branch`, asked for only if it changed since the last answer; nothing, if
+    /// there is none.
+    fn text_at(&self, path: &str, branch: &str) -> Result<Option<String>, Trouble> {
+        let key = format!("contents/{path}?ref={branch}");
         let mut request = self
             .call("GET", &key)
             .set("Accept", "application/vnd.github.raw");
@@ -325,48 +440,72 @@ fn beat_of(value: &str) -> Option<(String, Moment)> {
 }
 
 impl Beats for GitHub {
+    /// The beats, wherever drivers said them: as the repository's variables, and as the small files of
+    /// drivers who speak with git alone. Of two beats of one driver, the later is the one heard.
     fn heard(&self) -> Result<HashMap<String, Moment>, Trouble> {
-        let listing = self
-            .listing("actions/variables?per_page=30")?
+        let mut said: Vec<(String, Moment)> = Vec::new();
+        if !self.variables_closed() {
+            let listing = self
+                .listing("actions/variables?per_page=30")?
+                .unwrap_or(Value::Null);
+            said.extend(
+                listing["variables"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|v| v["name"].as_str().is_some_and(|n| n.starts_with(BEAT)))
+                    .filter_map(|v| beat_of(v["value"].as_str()?)),
+            );
+        }
+        let files = self
+            .listing(&format!("git/trees/{}:{BEATS}", self.branch))?
             .unwrap_or(Value::Null);
-        Ok(listing["variables"]
+        for file in files["tree"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|v| v["name"].as_str().is_some_and(|n| n.starts_with(BEAT)))
-            .filter_map(|v| beat_of(v["value"].as_str()?))
-            .collect())
+            .filter_map(|f| f["path"].as_str())
+        {
+            let text = self.text_at(&format!("{BEATS}/{file}"), &self.branch)?;
+            said.extend(text.as_deref().and_then(beat_of));
+        }
+        let mut heard: HashMap<String, Moment> = HashMap::new();
+        for (driver, at) in said {
+            let last = heard.entry(driver).or_insert(at);
+            *last = (*last).max(at);
+        }
+        Ok(heard)
     }
 
+    /// Says that `driver` is here: as a variable where the repository's Actions can be written from here,
+    /// and otherwise with git alone, as the driver's small file beside the asked work.
     fn beat(&mut self, driver: &str, at: Moment) -> Result<(), Trouble> {
-        let name = variable(driver);
         let value = json!({ "driver": driver, "at": at }).to_string();
-        match self
-            .call("GET", &format!("actions/variables/{name}"))
-            .call()
-        {
-            Ok(r) => {
-                let known: Value = r.into_json().map_err(unreachable)?;
-                // a beat never goes back: an older one than what is known is not written
-                if known["value"]
-                    .as_str()
-                    .and_then(beat_of)
-                    .is_some_and(|(_, last)| last >= at)
-                {
-                    return Ok(());
-                }
-                self.call("PATCH", &format!("actions/variables/{name}"))
-                    .send_json(json!({ "name": name, "value": value }))
-                    .map(|_| ())
-                    .map_err(said)
-            }
-            Err(ureq::Error::Status(404, _)) => self
-                .call("POST", "actions/variables")
-                .send_json(json!({ "name": name, "value": value }))
-                .map(|_| ())
-                .map_err(said),
-            Err(e) => Err(said(e)),
+        if self.beat_as_variable(driver, at, &value)? {
+            return Ok(());
         }
+        let path = beat_file(driver);
+        // a beat never goes back: an older one than what is known is not written
+        if self
+            .text_at(&path, &self.branch)?
+            .as_deref()
+            .and_then(beat_of)
+            .is_some_and(|(_, last)| last >= at)
+        {
+            return Ok(());
+        }
+        pushed::push(
+            &self.repo,
+            &self.branch,
+            &path,
+            value.as_bytes(),
+            &format!("{driver} is here"),
+            false,
+        )
+        .map_err(|not| match not {
+            pushed::NotPushed::AlreadyThere => unreachable(format!("{path} could not be written")),
+            pushed::NotPushed::Because(why) => unreachable(why),
+        })
     }
 }
 
@@ -378,6 +517,13 @@ mod tests {
     fn a_drivers_name_becomes_a_variables_name() {
         assert_eq!(variable("claude"), "OCO_AGENT_BEAT_CLAUDE");
         assert_eq!(variable("ann-lee.2"), "OCO_AGENT_BEAT_ANN_LEE_2");
+    }
+
+    #[test]
+    fn a_drivers_name_becomes_a_files_name_beside_the_asked_work() {
+        assert_eq!(beat_file("claude"), "oco-agent/beats/claude.json");
+        assert_eq!(beat_file("ann-lee.2"), "oco-agent/beats/ann-lee.2.json");
+        assert_eq!(beat_file("a b/c"), "oco-agent/beats/a_b_c.json");
     }
 
     #[test]

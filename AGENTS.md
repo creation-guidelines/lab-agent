@@ -35,6 +35,11 @@ better way, carry it back there - everything is still being perfected.
   files already in place and the program as it was. From an agent's sandbox, `ask NAME SCRIPT`
   (`oco-agent/tools/ask`) sends a job and follows it. When a job does something a second time that
   the next job will do too, it becomes a word of `oco-work`, not a line of the next job.
+- **From a fresh workspace**: a sandbox does not keep its tools, and may be replaced. Clone this
+  repository and run `oco-agent/tools/driver-setup`: it builds the client and puts `ask` beside it.
+  A driver gets to the lab through the jobs repository alone, by reading it and pushing to it, with
+  whatever credential its own workspace has for that - the lab's token is never copied into a sandbox.
+  Where a workspace's way out takes no write through GitHub's API, the client asks with git alone.
 - **Reading the user's messages**: print every unread message before acknowledging any
   (`lab-agent inbox`, then `inbox --ack`) - acknowledging blind once hid a message.
 

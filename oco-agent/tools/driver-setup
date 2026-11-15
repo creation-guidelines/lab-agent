@@ -1,0 +1,33 @@
+#!/bin/sh
+# driver-setup [DIR] - makes a workspace able to drive the lab, from a clone of this repository: builds
+# the oco-agent client and puts it, with `ask`, in DIR (~/.local/bin). It asks for no token and keeps none.
+#
+# How a driver gets to the lab: through the jobs repository alone ($OCO_AGENT_VIA; grenudi/lab-agent-jobs
+# where nothing else is said). It asks by putting a file there and reads what the lab speaks back. So a
+# workspace needs two things: to read that repository, and to push to it. How it is let do so is the
+# workspace's own affair:
+#
+#   - where the workspace attaches the credential itself, on the way out (a cloud workspace whose way out
+#     is a proxy, with the repository added to it): say OCO_AGENT_GITHUB_TOKEN=proxy-injected - a
+#     placeholder. The client then asks with git alone, since such a way out passes pushes and reads
+#   - with a token of its own: kept in a private file, ~/.config/lab-agent/token (mode 600), or named by
+#     OCO_AGENT_GITHUB_TOKEN - never in a script, a repository or an address
+#
+# Then: ask NAME SCRIPT sends a job and follows it.
+set -eu
+here=$(cd "$(dirname "$0")/../.." && pwd)
+to=${1:-$HOME/.local/bin}
+for needed in cargo git; do
+    command -v "$needed" >/dev/null || { echo "driver-setup: $needed is needed, and is not here" >&2; exit 1; }
+done
+cargo build --release --quiet --manifest-path "$here/Cargo.toml" -p oco-agent
+mkdir -p "$to"
+install -m 755 "$here/target/release/oco-agent" "$to/oco-agent"
+install -m 755 "$here/oco-agent/tools/ask" "$to/ask"
+echo "driver-setup: oco-agent and ask are in $to"
+if [ -z "${OCO_AGENT_GITHUB_TOKEN:-}" ] && [ ! -s "$HOME/.config/lab-agent/token" ]; then
+    echo "driver-setup: no token is kept here. Where the workspace attaches the credential itself, say:"
+    echo "    export OCO_AGENT_GITHUB_TOKEN=proxy-injected"
+fi
+echo "driver-setup: to see that the lab is reached:"
+echo "    oco-agent standing --via ${OCO_AGENT_VIA:-grenudi/lab-agent-jobs} --as ${OCO_AGENT_AS:-claude}"

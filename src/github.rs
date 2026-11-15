@@ -118,6 +118,8 @@ impl Client {
                 .timeout_connect(std::time::Duration::from_secs(15))
                 .timeout_read(std::time::Duration::from_secs(60))
                 .timeout_write(std::time::Duration::from_secs(60))
+                // a caller's workspace may have its own way out - a proxy named by the environment
+                .try_proxy_from_env(true)
                 .build(),
         }
     }
