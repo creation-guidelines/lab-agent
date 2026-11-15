@@ -12,7 +12,7 @@ mod speaking;
 use argenv_resolve::*;
 use contract::{Command, Contract};
 use oco_agent_core::doing::Doing;
-use oco_agent_core::journal::{standing, state, Entry, Journal, Moment, Trouble};
+use oco_agent_core::journal::{standing, state, Entry, Journal, Moment, State, Trouble};
 use oco_agent_core::leases::Beats;
 use oco_agent_core::saying::{carry, Said, Sayings, Voice, EVERYONE};
 use oco_agent_github::GitHub;
@@ -133,24 +133,29 @@ fn log_of(job: &str, folder: &Path, via: Option<&GitHub>) -> Result<String, Trou
 }
 
 /// Waits for `job` to end, beating while it waits; its output, its end in words, and an exit status.
+/// Through a repository, a driver beats only while its job has not started - a lease matters until
+/// then - and a third of a lease apart: the asking itself was the first beat.
 fn wait(
     job: &str,
     who: &str,
     folder: &Path,
     mut via: Option<GitHub>,
     within: u64,
+    lasts: u64,
 ) -> Result<(String, i32), Trouble> {
     let began = seconds();
-    let mut last_beat = 0;
+    let mut last_beat = if via.is_some() { began } else { 0 };
     loop {
         let now = seconds();
         let entries = match via.as_mut() {
             Some(remote) => {
-                if now.saturating_sub(last_beat) >= 60 {
+                let entries = spoken_journal(remote)?;
+                let waits = matches!(state(&entries, job), None | Some(State::Waiting { .. }));
+                if waits && now.saturating_sub(last_beat) >= (lasts / 3).max(60) {
                     remote.beat(who, now)?;
                     last_beat = now;
                 }
-                spoken_journal(remote)?
+                entries
             }
             None => {
                 let mut kept = InTad::open(folder)?;
@@ -481,6 +486,7 @@ fn main() {
                     Contract::WITHIN
                         .get_from_or_default(&resolved)
                         .unwrap_or(600),
+                    lasts,
                 )
             })
             .map(|(text, s)| {

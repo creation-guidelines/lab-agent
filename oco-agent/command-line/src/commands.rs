@@ -219,7 +219,9 @@ pub fn standing_in_words(stands: Option<&State>) -> String {
         .unwrap_or_else(|| "not yet taken in".into())
 }
 
-/// Asks for a job through a repository: the asking is itself a beat there.
+/// Asks for a job through a repository. The asking is itself a beat: it says who asked and when, and
+/// whoever takes the work in counts it as one - so a driver says one thing, by whatever way its
+/// workspace lets it put a file there.
 pub fn submit_via(remote: &mut GitHub, r: &Request, now: Moment) -> Result<String, Trouble> {
     a_safe_name(r.job)?;
     a_safe_name(r.who).map_err(|_| Trouble::Refused {
@@ -229,7 +231,6 @@ pub fn submit_via(remote: &mut GitHub, r: &Request, now: Moment) -> Result<Strin
             r.who
         ),
     })?;
-    remote.beat(r.who, now)?;
     let script = r.script.unwrap_or("").to_string();
     remote.ask(&Asking {
         job: r.job.into(),
@@ -292,6 +293,8 @@ pub fn take_in(
             .map_err(|e| Trouble::Unreachable {
                 because: e.to_string(),
             })?;
+        // the asking is itself a beat: whoever asked was there when they asked
+        kept.beat(&asking.by, asking.asked)?;
         kept.record(Entry {
             job: job.clone(),
             at: asking.asked,
