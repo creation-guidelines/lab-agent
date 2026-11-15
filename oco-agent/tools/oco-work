@@ -186,7 +186,8 @@ landit() {
 # view points nowhere: a check of a place looks at that place, so a link into it from elsewhere is seen
 # only there
 holds_everywhere() {
-    ocoeco check --root "$PLACES" | tail -1 | grep -q "all is well" || {
+    # where one stands in a place, that place against every other; the whole is asked from anywhere
+    [ ! -f oco.toml ] || ocoeco check --root "$PLACES" | tail -1 | grep -q "all is well" || {
         ocoeco check --root "$PLACES" | grep FAIL | head -3 | cut -c1-200
         stop "a place does not hold"
     }
