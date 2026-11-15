@@ -2,7 +2,8 @@
 # then says only what is its own. Reading this does nothing: each thing below is a word to use.
 #
 #   whole                      the author's observatory at its main: where one stands to look at the whole
-#   fresh PLACE BRANCH [SHA]   a place at its main, on a new branch; with SHA, only if its main is still there
+#   fresh PLACE BRANCH [SHA]   a place at its main, on a new branch; with SHA, only if its main is still there.
+#                              A job that stops leaves that place as its main has it
 #   change FILE <<'CHANGE'     in FILE, the exact text above the line "--- becomes ---" becomes the text
 #                              below it, once; it stops where that text is not there. Only what changes is
 #                              sent - never a whole file to change a few of its lines
@@ -49,6 +50,13 @@ stop() {
         rm -f "$_oco_tried"
         echo "  the program from before is back in place"
     fi
+    # and the place it was working in is put back as its main has it: what a stopped job left half done
+    # is otherwise what every look from elsewhere sees of that place, until the next job there
+    if [ -n "${_oco_place:-}" ] && [ -d "$_oco_place/.git" ]; then
+        (cd "$_oco_place" && git checkout -q -- . 2>/dev/null; git clean -qfd 2>/dev/null
+            git checkout -q main 2>/dev/null && git reset -q --hard origin/main 2>/dev/null)
+        echo "  ${_oco_place#"$PLACES"/} is back as its main has it"
+    fi
     echo "STOPPING: $1"
     exit 1
 }
@@ -66,6 +74,7 @@ whole() {
 
 fresh() {
     cd "$PLACES/$1" || stop "no place is held at $1"
+    _oco_place="$PLACES/$1"
     git fetch -q origin && git checkout -q main && git reset -q --hard origin/main && git clean -qfd &&
         git checkout -q -B "$2" origin/main || stop "a branch in $1"
     if [ -n "${3:-}" ] && [ "$(git rev-parse HEAD)" != "$3" ]; then
@@ -167,6 +176,7 @@ landit() {
         stop "landing $PWD"
     fi
     git checkout -q main && git fetch -q && git reset -q --hard origin/main
+    _oco_place=""
 }
 
 holds_everywhere() {
