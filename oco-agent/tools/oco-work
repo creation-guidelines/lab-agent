@@ -12,7 +12,8 @@
 #   rust_checked               format, lint, run the guards of, and build the Rust of the place one is in
 #   tried / kept               put the program just built in place of the one in use, which is kept and put
 #                              back if the job stops; `kept` says the trial is over and the new one stays
-#   looks_kept NAME LENS...    keep how these lenses look now, from the observatory
+#   looks_kept NAME LENS...    keep how these lenses look now, from the observatory - looked at in passing,
+#                              so that comparing how a thing looks does not stand on it
 #   looks_same NAME            stop unless they look as they did when kept - but for what moves by itself
 #   timed COMMAND...           how long a command takes
 #   landit SUMMARY [KIND]      check, record, commit and land the place one is in, and be back at its main
@@ -119,12 +120,15 @@ unmoved() {
     sed -E 's/- [0-9]+ min ago/- N min ago/; s/, [0-9]+ min ago/, N min ago/; s/being done for [0-9]+ min/being done for N min/; s/the last at [0-9: -]*/the last at T/; s/ - gathered in [0-9]+ ms[^;]*//'
 }
 
+# a look taken to compare is in passing: a job checking how a thing looks is not a driver standing on it
+_oco_look() { (cd "$OBSERVATORY" && ocoeco focus "$1" --passing 2>&1) | unmoved; }
+
 looks_kept() {
     local name="$1" lens
     shift
     mkdir -p "$_oco_looks/$name" && rm -f "$_oco_looks/$name"/* "$_oco_looks/$name"/.lenses
     for lens in "$@"; do
-        (cd "$OBSERVATORY" && ocoeco focus "$lens" 2>&1) | unmoved > "$_oco_looks/$name/$(echo "$lens" | tr '/@: ' '----')"
+        _oco_look "$lens" > "$_oco_looks/$name/$(echo "$lens" | tr '/@: ' '----')"
         echo "$lens" >> "$_oco_looks/$name/.lenses"
     done
 }
@@ -134,11 +138,11 @@ looks_same() {
     while read -r lens; do
         all=$((all + 1))
         kept="$_oco_looks/$name/$(echo "$lens" | tr '/@: ' '----')"
-        if (cd "$OBSERVATORY" && ocoeco focus "$lens" 2>&1) | unmoved | cmp -s - "$kept"; then
+        if _oco_look "$lens" | cmp -s - "$kept"; then
             same=$((same + 1))
         else
             echo "  $lens differs:"
-            (cd "$OBSERVATORY" && ocoeco focus "$lens" 2>&1) | unmoved | diff "$kept" - | grep '^[<>]' | head -4 | cut -c1-150
+            _oco_look "$lens" | diff "$kept" - | grep '^[<>]' | head -4 | cut -c1-150
         fi
     done < "$_oco_looks/$name/.lenses"
     echo "  $all looks show what they showed: $same of $all"
