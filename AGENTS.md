@@ -36,7 +36,9 @@ better way, carry it back there - everything is still being perfected.
   (`oco-agent/tools/ask`) sends a job and follows it. When a job does something a second time that
   the next job will do too, it becomes a word of `oco-work`, not a line of the next job.
 - **From a fresh workspace**: a sandbox does not keep its tools, and may be replaced. Clone this
-  repository and run `oco-agent/tools/driver-setup`: it builds the client and puts `ask` beside it.
+  repository and run `oco-agent/tools/driver-setup`: it builds the client and puts `ask` and `brought`
+  beside it - `ask` sends a job and follows it; `brought` fetches what a job has shown (`shown FILE`, a
+  word of oco-work): a page or a screenshot made on the lab, to be looked at where the driver is.
   A driver gets to the lab through the jobs repository alone, by reading it and pushing to it, with
   whatever credential its own workspace has for that - the lab's token is never copied into a sandbox.
   Where a workspace's way out takes no write through GitHub's API, the client asks with git alone.

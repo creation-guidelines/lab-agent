@@ -13,7 +13,7 @@
 #   - with a token of its own: kept in a private file, ~/.config/lab-agent/token (mode 600), or named by
 #     OCO_AGENT_GITHUB_TOKEN - never in a script, a repository or an address
 #
-# Then: ask NAME SCRIPT sends a job and follows it.
+# Then: ask NAME SCRIPT sends a job and follows it; brought NAME fetches what a job has shown.
 set -eu
 here=$(cd "$(dirname "$0")/../.." && pwd)
 to=${1:-$HOME/.local/bin}
@@ -24,7 +24,8 @@ cargo build --release --quiet --manifest-path "$here/Cargo.toml" -p oco-agent
 mkdir -p "$to"
 install -m 755 "$here/target/release/oco-agent" "$to/oco-agent"
 install -m 755 "$here/oco-agent/tools/ask" "$to/ask"
-echo "driver-setup: oco-agent and ask are in $to"
+install -m 755 "$here/oco-agent/tools/brought" "$to/brought"
+echo "driver-setup: oco-agent, ask and brought are in $to"
 if [ -z "${OCO_AGENT_GITHUB_TOKEN:-}" ] && [ ! -s "$HOME/.config/lab-agent/token" ]; then
     echo "driver-setup: no token is kept here. Where the workspace attaches the credential itself, say:"
     echo "    export OCO_AGENT_GITHUB_TOKEN=proxy-injected"
