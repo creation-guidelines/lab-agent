@@ -19,7 +19,12 @@
 #   timed COMMAND...           how long a command takes
 #   landit SUMMARY [KIND]      check, record, commit and land the place one is in, and be back at its main
 #   holds_everywhere           stop unless every place under ~/Projects holds
-#   released REPO              merge the release pull request of owner/repo, once it is there
+#   released REPO              merge the release pull request of owner/repo, once it is there; wait until
+#                              the release has its files - as many as the one before it - and bring the
+#                              place held to its main: a release is said once it can be taken
+#   straight SUMMARY [KIND]    check, record, commit and push the place one is in straight onto its main:
+#                              for a place that takes what is entered without a pull request - the
+#                              conversation - after `fresh PLACE main`
 #   turn ID AFTER AT TEXT [SAID]  enter a turn of the author's into the conversation, as it was said and
 #                              with the moment it was said (AT, as 2026-11-15T18:44:00Z); it stops where
 #                              the conversation's place does not hold with it
@@ -204,18 +209,55 @@ holds_everywhere() {
     }
 }
 
+# a release is said once it can be taken: its pull request merged, the release there with its files - as
+# many as the one before it had - and the place held brought to its main, so that a look over the places
+# held sees it
 released() {
-    local n="" tries=0
+    local n="" tries=0 before now="" had has=0
+    before=$(gh release list --repo "$1" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null)
     while [ -z "$n" ] && [ "$tries" -lt 9 ]; do
         n=$(gh pr list --repo "$1" --state open --json number,title -q '[.[] | select(.title | test("release"))][0].number' 2>/dev/null)
         [ -n "$n" ] || { tries=$((tries + 1)); sleep 20; }
     done
     [ -n "$n" ] || { echo "  no release of $1 is waiting"; return 0; }
-    if gh pr merge "$n" --repo "$1" --squash >/dev/null 2>&1; then
-        echo "  released: $(gh pr view "$n" --repo "$1" --json title -q .title)"
-    else
+    if ! gh pr merge "$n" --repo "$1" --squash >/dev/null 2>&1; then
         echo "  the release of $1 could not be merged"
+        return 0
     fi
+    echo "  released: $(gh pr view "$n" --repo "$1" --json title -q .title)"
+    had=$(gh api "repos/$1/releases/tags/$before" --jq '.assets | length' 2>/dev/null)
+    tries=0
+    while [ "$tries" -lt 60 ]; do
+        now=$(gh release list --repo "$1" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null)
+        if [ -n "$now" ] && [ "$now" != "$before" ]; then
+            has=$(gh api "repos/$1/releases/tags/$now" --jq '.assets | length' 2>/dev/null)
+            [ "${has:-0}" -ge "${had:-0}" ] && break
+        fi
+        tries=$((tries + 1))
+        sleep 15
+    done
+    if [ -d "$PLACES/$1/.git" ] && [ "$(git -C "$PLACES/$1" rev-parse --abbrev-ref HEAD)" = main ]; then
+        git -C "$PLACES/$1" fetch -q && git -C "$PLACES/$1" reset -q --hard origin/main
+    fi
+    if [ -n "$now" ] && [ "$now" != "$before" ] && [ "${has:-0}" -ge "${had:-0}" ]; then
+        echo "  $now can be taken: ${has:-0} file(s), as the one before it had"
+    else
+        echo "  the new release of $1 does not have its files yet: ${has:-0} of ${had:-0}"
+    fi
+}
+
+# for a place that takes what is entered straight on its main - the conversation: the place one is in is
+# checked, recorded, committed and pushed as it stands
+straight() {
+    [ "${#1}" -le 88 ] || stop "the summary is ${#1} characters and at most 88 fit: $1"
+    [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || stop "straight is for a place on its main, and $PWD is on another branch"
+    ocoeco check | tail -1 | grep -q "all is well" || {
+        ocoeco check | grep FAIL | head -3 | cut -c1-220
+        stop "the place at $PWD does not hold"
+    }
+    ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null && git push -q origin main || stop "keeping the work in $PWD"
+    echo "  kept on its main: ${PWD#"$PLACES"/}"
+    _oco_place=""
 }
 
 # what a job shows goes the one way a driver and the lab share: the jobs repository, on a branch of its own
