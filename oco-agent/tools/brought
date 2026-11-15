@@ -1,0 +1,26 @@
+#!/bin/sh
+# brought [--to DIR] NAME... - from an agent's own sandbox: brings what a job on the lab has shown (the word
+# `shown`, in oco-work) to where the driver is - each file by its name, from the branch shots of the jobs
+# repository, into DIR (here). A page made on the lab is then looked at where the driver is: at any
+# width, in the dark, with a fold opened, as often as needed - a look does not take a job each time.
+#
+# It reads the jobs repository as ask does: with OCO_AGENT_GITHUB_TOKEN, or the token kept in
+# ~/.config/lab-agent/token. The token is handed to curl out of sight - never on a command line, where
+# the list of what runs would show it.
+set -eu
+via=${OCO_AGENT_VIA:-grenudi/lab-agent-jobs}; to=.
+if [ "${1:-}" = "--to" ]; then to=$2; shift 2; fi
+[ $# -gt 0 ] || { echo "brought: which file? brought [--to DIR] NAME..." >&2; exit 1; }
+token=${OCO_AGENT_GITHUB_TOKEN:-$(cat "$HOME/.config/lab-agent/token" 2>/dev/null || true)}
+[ -n "$token" ] || { echo "brought: nothing here says how to read $via: OCO_AGENT_GITHUB_TOKEN, or a token kept in ~/.config/lab-agent/token" >&2; exit 1; }
+mkdir -p "$to"
+for name in "$@"; do
+    if printf 'header = "Authorization: Bearer %s"\n' "$token" |
+        curl -fsSL -K - -H "Accept: application/vnd.github.raw" \
+            "https://api.github.com/repos/$via/contents/shots/$name?ref=shots" -o "$to/$name"; then
+        echo "brought: $to/$name"
+    else
+        echo "brought: $name is not shown there" >&2
+        exit 1
+    fi
+done

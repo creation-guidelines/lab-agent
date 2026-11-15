@@ -21,6 +21,8 @@
 #   holds_everywhere           stop unless every place under ~/Projects holds
 #   released REPO              merge the release pull request of owner/repo, once it is there
 #   turn ID AFTER TEXT [SAID]  enter a turn of the author's into the conversation, as it was said
+#   shown FILE...              show files to the driver who asked - a page, a screenshot: each is put, under
+#                              its own name, where the driver brings it from (brought NAME, on its side)
 #
 # To compare before and after a change to a program: look before with the changed files already in place
 # and the program as it was - looks_kept after the changes, before `tried` - so that only the program
@@ -211,6 +213,23 @@ released() {
     else
         echo "  the release of $1 could not be merged"
     fi
+}
+
+# what a job shows goes the one way a driver and the lab share: the jobs repository, on a branch of its own
+shown() {
+    local f n sha via="${OCO_AGENT_VIA:-grenudi/lab-agent-jobs}"
+    for f in "$@"; do
+        [ -s "$f" ] || { echo "  not shown, for it is not there: $f"; continue; }
+        n=$(basename "$f")
+        sha=$(gh api "repos/$via/contents/shots/$n?ref=shots" -q .sha 2>/dev/null || true)
+        if base64 -w0 "$f" | jq -Rn --arg m "shown: $n" --arg s "$sha" \
+            '{message: $m, branch: "shots", content: input} + (if $s == "" then {} else {sha: $s} end)' |
+            gh api -X PUT "repos/$via/contents/shots/$n" --input - -q .content.path >/dev/null 2>&1; then
+            echo "  shown: $n"
+        else
+            echo "  not shown: $n"
+        fi
+    done
 }
 
 turn() {
