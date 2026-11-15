@@ -1,0 +1,22 @@
+#!/bin/sh
+# ask NAME SCRIPT [LINES] - from an agent's own sandbox: ask oco-agent to run SCRIPT on the lab as the job
+# NAME-<now>, follow it until it has ended or about four minutes have passed, and show the last LINES
+# lines it said (24). `ask --more [LINES]` goes on following the job last asked for. It is told how to
+# reach the lab by what the sandbox already has: oco-agent on the PATH, and the token it reads.
+via=${OCO_AGENT_VIA:-grenudi/lab-agent-jobs}; as=${OCO_AGENT_AS:-claude}; last=${ASK_LAST:-/tmp/ask-last}
+if [ "$1" = "--more" ]; then
+    job=$(cat "$last"); lines=${2:-24}
+else
+    job="$1-$(date +%s)"; lines=${3:-24}; echo "$job" > "$last"
+    oco-agent submit "$job" --file "$2" --via "$via" --as "$as" >/dev/null 2>&1 || { echo "the job could not be asked for"; exit 1; }
+fi
+n=0
+while [ "$n" -lt 9 ]; do
+    stands=$(timeout 25 oco-agent standing --via "$via" --as "$as" 2>&1 | grep "$job" | tail -1)
+    case "$stands" in *finished* | *failed*) break ;; esac
+    n=$((n + 1)); sleep 22
+done
+case "$stands" in
+    *finished* | *failed*) timeout 40 oco-agent wait "$job" --via "$via" --as "$as" 2>&1 | tail -"$lines" | cut -c1-300 ;;
+    *) echo "still running: $job - ask --more to go on following it" ;;
+esac

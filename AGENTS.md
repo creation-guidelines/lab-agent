@@ -26,6 +26,15 @@ better way, carry it back there - everything is still being perfected.
   shell string such as `nix-shell --run "cmd $files"`: the newlines turn every name after the first
   into a command, and the scripts run. It happened once; nothing was damaged only because every
   state-changing script refuses to run without arguments.
+- **A job says only what is its own**: a job that works on the ecosystem begins `. oco-work`
+  (`oco-agent/tools/oco-work`, kept in `~/.local/bin`) and uses its words - `fresh`, `change`, `stand`,
+  `enter`, `rust_checked`, `tried`/`kept`, `looks_kept`/`looks_same`, `landit`, `released`, `turn` -
+  instead of saying again what every job does. A change to a file is sent as the text that changes
+  (`change FILE <<'CHANGE'`, the old text, the line `--- becomes ---`, the new text, `CHANGE`), never
+  as the whole file. To compare before and after a change to a program, look before with the changed
+  files already in place and the program as it was. From an agent's sandbox, `ask NAME SCRIPT`
+  (`oco-agent/tools/ask`) sends a job and follows it. When a job does something a second time that
+  the next job will do too, it becomes a word of `oco-work`, not a line of the next job.
 - **Reading the user's messages**: print every unread message before acknowledging any
   (`lab-agent inbox`, then `inbox --ack`) - acknowledging blind once hid a message.
 
