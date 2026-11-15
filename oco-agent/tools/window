@@ -1,0 +1,27 @@
+#!/bin/sh
+# window [WORDS] - from an agent's own sandbox: say WORDS in the window on the lab - nothing, a mark, a lens
+# or an entry by its name, back, up: the words it last showed - standing where one stands there, and be
+# shown what it shows. What an entry asks is given on standard input, each as FIELD: words; what is entered
+# is landed there. It carries the words and what is shown; it knows nothing of what they mean.
+via=${OCO_AGENT_VIA:-grenudi/lab-agent-jobs}; as=${OCO_AGENT_AS:-claude}
+job="window-$(date +%s)"; script=$(mktemp)
+given=""; [ -t 0 ] || given=$(cat)
+{
+    echo '#!/bin/bash'
+    echo '. oco-work'
+    printf 'said'
+    for word in "$@"; do printf " '%s'" "$(printf '%s' "$word" | sed "s/'/'\\\\''/g")"; done
+    if [ -n "$given" ]; then
+        printf " <<'GIVEN_IN_THE_WINDOW'\n%s\nGIVEN_IN_THE_WINDOW\n" "$given"
+    else
+        echo ' < /dev/null'
+    fi
+} > "$script"
+oco-agent submit "$job" --file "$script" --via "$via" --as "$as" >/dev/null 2>&1 || { echo "the window could not be reached"; exit 1; }
+n=0
+while [ "$n" -lt 240 ]; do
+    stands=$(timeout 25 oco-agent standing --via "$via" --as "$as" 2>&1 | grep "$job" | tail -1)
+    case "$stands" in *finished* | *failed*) break ;; esac
+    n=$((n + 1)); sleep 3
+done
+timeout 40 oco-agent wait "$job" --via "$via" --as "$as" 2>&1 | grep -v "^$job \(finished\|failed\)\$"
