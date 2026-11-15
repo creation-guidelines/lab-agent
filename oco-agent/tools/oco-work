@@ -25,6 +25,9 @@
 # To compare before and after a change to a program: look before with the changed files already in place
 # and the program as it was - looks_kept after the changes, before `tried` - so that only the program
 # differs. A guard added, a step taken, a minute passed are otherwise taken for what the change did.
+# And compare looks that do not count everything in view - signs, work, purpose - where the change is to
+# the language itself: a part of a lens is a thing, so a lens that gains a part adds one to every count
+# of the whole, and rightly.
 
 export GH_TOKEN="$(cat ~/.config/lab-agent/token)"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
