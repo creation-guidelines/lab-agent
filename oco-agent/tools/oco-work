@@ -59,6 +59,9 @@ FIRST_OBSERVATORY=open-commons-observatory/open-commons-observatory.github.io
 AUTHORS_OBSERVATORY=marshall-oco/marshall-oco.github.io
 CONVERSATION=marshall-oco/conversation
 LAB_AGENT=creation-guidelines/lab-agent
+# where the language's place is held on the lab: every look and check a job makes reads the language as its
+# place keeps it - also a place's own check, made where the language's place is not in view
+export OCOECO_LANGUAGE="$PLACES/$OCOECO"
 _oco_tried="/tmp/oco-work-tried-$$"
 _oco_looks="/tmp/oco-work-looks-$$"
 # a job's trail is its own: what it stands on says where its work was made, and is no step of the driver who
