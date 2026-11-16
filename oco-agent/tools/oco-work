@@ -187,10 +187,16 @@ looks_same() {
 timed() { { time -p "$@" >/dev/null 2>&1; } 2>&1 | awk '/^real/ { print $2 "s" }'; }
 
 landit() {
-    local out
+    local out check=(ocoeco check)
     [ "${#1}" -le 88 ] || stop "the summary is ${#1} characters and at most 88 fit: $1"
-    ocoeco check | tail -1 | grep -q "all is well" || {
-        ocoeco check | grep FAIL | head -3 | cut -c1-220
+    # a change to the language is checked where it is read: with the places beside the language's place,
+    # every lens they keep comes into focus with the language as it would land
+    if [ "${PWD#"$PLACES"/}" = "$OCOECO" ] && [ -n "$(git diff --name-only origin/main -- language)" ]; then
+        check+=(--root "$PLACES")
+    fi
+    out=$("${check[@]}" < /dev/null 2>&1)
+    echo "$out" | tail -1 | grep -q "all is well" || {
+        echo "$out" | grep FAIL | head -3 | cut -c1-220
         stop "the place at $PWD does not hold"
     }
     XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
