@@ -307,17 +307,24 @@ turn() {
 # what is said in the window - where an entry is made by saying its name and what it asks - is landed as it
 # is entered: the window says where it was kept, and this lands that place
 said() {
-    local out kept summary
+    local out places kept first more summary
     out=$(cd "$OBSERVATORY" && ocoeco "$@" 2>&1)
     echo "$out"
-    kept=$(echo "$out" | sed -n 's/^entered: \([^ ]*\) | .*/\1/p' | head -1)
-    [ -n "$kept" ] || return 0
-    summary=$(echo "$out" | sed -n 's/^entered: [^ ]* | //p' | head -1 | cut -c1-88)
-    cd "$PLACES/$kept" || stop "what was entered is kept in $kept, and no such place is held"
-    _oco_place="$PLACES/$kept"
-    if [ "$kept" = "$CONVERSATION" ]; then
-        straight "$summary"
-    else
-        git checkout -q -b "said/$(date +%s)" && landit "$summary"
-    fi
+    # what one saying entered, place by place: all it entered in a place lands as one
+    places=$(echo "$out" | sed -n 's/^entered: \([^ ]*\) | .*/\1/p' | awk '!seen[$0]++')
+    [ -n "$places" ] || return 0
+    for kept in $places; do
+        first=$(echo "$out" | grep -F "entered: $kept | " | head -1)
+        more=$(( $(echo "$out" | grep -cF "entered: $kept | ") - 1 ))
+        summary=${first#"entered: $kept | "}
+        [ "$more" -gt 0 ] && summary="$(echo "$summary" | cut -c1-72), and $more more"
+        summary=$(echo "$summary" | cut -c1-88)
+        cd "$PLACES/$kept" || stop "what was entered is kept in $kept, and no such place is held"
+        _oco_place="$PLACES/$kept"
+        if [ "$kept" = "$CONVERSATION" ]; then
+            straight "$summary"
+        else
+            git checkout -q -b "said/$(date +%s)" && landit "$summary"
+        fi
+    done
 }
