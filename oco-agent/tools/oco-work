@@ -7,7 +7,8 @@
 #   change FILE <<'CHANGE'     in FILE, the exact text above the line "--- becomes ---" becomes the text
 #                              below it, once; it stops where that text is not there. Only what changes is
 #                              sent - never a whole file to change a few of its lines
-#   stand THING...             stand on each thing; the record of work then says where it was made
+#   stand THING...             stand on each thing; the record of work then says where it was made - in a
+#                              trail of the job's own: the driver who asked stays where they stand
 #   enter ENTRY --flag ...     make an entry, or stop and say why not
 #   fits1 ENTRY --flag BEGUN   the one thing that fits what was begun: never an id typed from memory
 #   rust_checked               format, lint, run the guards of, and build the Rust of the place one is in
@@ -60,6 +61,11 @@ CONVERSATION=marshall-oco/conversation
 LAB_AGENT=creation-guidelines/lab-agent
 _oco_tried="/tmp/oco-work-tried-$$"
 _oco_looks="/tmp/oco-work-looks-$$"
+# a job's trail is its own: what it stands on says where its work was made, and is no step of the driver who
+# asked for it. The window, said within a job, is the driver's own act: it steps where the driver stands, and
+# what it enters lands with where the driver stood
+_oco_trail="/tmp/oco-work-trail-$$"
+mkdir -p "$_oco_trail"
 
 stop() {
     if [ -f "$_oco_tried" ]; then
@@ -112,7 +118,7 @@ change() {
 stand() {
     local thing
     for thing in "$@"; do
-        (cd "$OBSERVATORY" && ocoeco focus "around@$thing" >/dev/null 2>&1) || stop "standing on $thing"
+        (cd "$OBSERVATORY" && XDG_DATA_HOME="$_oco_trail" ocoeco focus "around@$thing" >/dev/null 2>&1) || stop "standing on $thing"
     done
 }
 
@@ -184,7 +190,7 @@ landit() {
         ocoeco check | grep FAIL | head -3 | cut -c1-220
         stop "the place at $PWD does not hold"
     }
-    ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
+    XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
     out=$(land --no-manual 2>&1)
     if echo "$out" | grep -q "merged into"; then
         echo "  landed: ${PWD#"$PLACES"/}"
@@ -270,7 +276,7 @@ straight() {
         ocoeco check | grep FAIL | head -3 | cut -c1-220
         stop "the place at $PWD does not hold"
     }
-    ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null && git push -q origin main || stop "keeping the work in $PWD"
+    XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null && git push -q origin main || stop "keeping the work in $PWD"
     echo "  kept on its main: ${PWD#"$PLACES"/}"
     _oco_place=""
 }
@@ -320,6 +326,8 @@ turn() {
 # is entered: the window says where it was kept, and this lands that place
 said() {
     local out places kept first more summary
+    # the driver's own act: what it enters lands with where the driver stood
+    local _oco_trail="${XDG_DATA_HOME:-$HOME/.local/share}"
     out=$(cd "$OBSERVATORY" && ocoeco "$@" 2>&1)
     echo "$out"
     # what one saying entered, place by place: all it entered in a place lands as one
