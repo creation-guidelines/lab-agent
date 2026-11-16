@@ -17,7 +17,8 @@
 #                              so that comparing how a thing looks does not stand on it
 #   looks_same NAME            stop unless they look as they did when kept - but for what moves by itself
 #   timed COMMAND...           how long a command takes
-#   landit SUMMARY [KIND]      check, record, commit and land the place one is in, and be back at its main
+#   landit SUMMARY [KIND]      check, record, commit and land the place one is in, and be back at its main;
+#                              where that place keeps these words, the ones that landed are put to use
 #   holds_everywhere           stop unless every place under ~/Projects holds
 #   released REPO              merge the release pull request of owner/repo, once it is there; wait until
 #                              the release has its files - as many as the one before it - and bring the
@@ -192,7 +193,18 @@ landit() {
         stop "landing $PWD"
     fi
     git checkout -q main && git fetch -q && git reset -q --hard origin/main
+    [ "${PWD#"$PLACES"/}" != "$LAB_AGENT" ] || _oco_words_in_use
     _oco_place=""
+}
+
+# the words every job uses are the ones that landed: where the place that keeps them is at its main and
+# holds other words than the ones in use, those take their place - and the next job begins with them. The
+# job that landed them goes on with the words it began with
+_oco_words_in_use() {
+    local landed="$PLACES/$LAB_AGENT/oco-agent/tools/oco-work"
+    [ -f "$landed" ] && [ "$(git -C "$PLACES/$LAB_AGENT" rev-parse --abbrev-ref HEAD 2>/dev/null)" = main ] || return 0
+    cmp -s "$landed" "$HOME/.local/bin/oco-work" && return 0
+    install -m 755 "$landed" "$HOME/.local/bin/oco-work" && echo "  in use from the next job on: the words that landed"
 }
 
 # the place one is in holds against every other - and, asked of the whole from the observatory, no link in

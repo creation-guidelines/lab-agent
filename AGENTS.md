@@ -27,7 +27,8 @@ better way, carry it back there - everything is still being perfected.
   into a command, and the scripts run. It happened once; nothing was damaged only because every
   state-changing script refuses to run without arguments.
 - **A job says only what is its own**: a job that works on the ecosystem begins `. oco-work`
-  (`oco-agent/tools/oco-work`, kept in `~/.local/bin`) and uses its words - `fresh`, `change`, `stand`,
+  (`oco-agent/tools/oco-work`, kept in `~/.local/bin` - put there when this repository lands on the
+  lab, by `landit`, so the words in use are the ones that landed) and uses its words - `fresh`, `change`, `stand`,
   `enter`, `rust_checked`, `tried`/`kept`, `looks_kept`/`looks_same`, `landit`, `released`, `turn` -
   instead of saying again what every job does. A change to a file is sent as the text that changes
   (`change FILE <<'CHANGE'`, the old text, the line `--- becomes ---`, the new text, `CHANGE`), never
