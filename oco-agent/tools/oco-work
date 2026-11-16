@@ -244,7 +244,8 @@ holds_everywhere() {
 # held sees it
 released() {
     local n="" tries=0 before now="" had has=0
-    before=$(gh release list --repo "$1" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null)
+    # the newest release said: a draft is not yet said - the package conveyor says it once its files are there
+    before=$(gh release list --repo "$1" --limit 1 --exclude-drafts --json tagName -q '.[0].tagName' 2>/dev/null)
     while [ -z "$n" ] && [ "$tries" -lt 9 ]; do
         n=$(gh pr list --repo "$1" --state open --json number,title -q '[.[] | select(.title | test("release"))][0].number' 2>/dev/null)
         [ -n "$n" ] || { tries=$((tries + 1)); sleep 20; }
@@ -258,7 +259,7 @@ released() {
     had=$(gh api "repos/$1/releases/tags/$before" --jq '.assets | length' 2>/dev/null)
     tries=0
     while [ "$tries" -lt 60 ]; do
-        now=$(gh release list --repo "$1" --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null)
+        now=$(gh release list --repo "$1" --limit 1 --exclude-drafts --json tagName -q '.[0].tagName' 2>/dev/null)
         if [ -n "$now" ] && [ "$now" != "$before" ]; then
             has=$(gh api "repos/$1/releases/tags/$now" --jq '.assets | length' 2>/dev/null)
             [ "${has:-0}" -ge "${had:-0}" ] && break
