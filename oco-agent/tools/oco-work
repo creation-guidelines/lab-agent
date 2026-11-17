@@ -199,6 +199,10 @@ landit() {
         if grep -q '^verify:' Makefile 2>/dev/null; then
             out=$(make -s verify < /dev/null 2>&1) || { echo "$out" | tail -5; stop "the place at $PWD is not as its CI checks it"; }
         fi
+    elif grep -q '^id = "linux-phone-oco/' oco.toml 2>/dev/null; then
+        # linux-phone depends on nothing of ocoeco (the author, 2026-11-17): a place of it without a tad base is
+        # checked by its own CI, which land waits for - no ocoeco check here
+        :
     else
         # a change to the language is checked where it is read: with the places beside the language's place,
         # every lens they keep comes into focus with the language as it would land
