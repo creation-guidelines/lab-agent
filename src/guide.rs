@@ -28,15 +28,21 @@ pub fn run() -> Result<()> {
 /// The practices, numbered, each with why and for whom; lines that are not practices are skipped.
 pub fn render(text: &str, source: &str) -> String {
     let mut out = format!("How to work in the open-commons ecosystem ({source})\n\n");
-    let mut n = 0;
-    for line in text.lines() {
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        let Some(practice) = v["practice"].as_str() else {
-            continue;
-        };
-        n += 1;
+    // in the order of the ids, each numbered by the number its id begins with - as ideal-agent's session
+    // start numbers them - so a practice is called by one number wherever it stands in the file
+    let mut all: Vec<serde_json::Value> = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|v| v["practice"].is_string())
+        .collect();
+    all.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    for (i, v) in all.iter().enumerate() {
+        let practice = v["practice"].as_str().unwrap_or("");
+        let n = v["id"]
+            .as_str()
+            .and_then(|id| id.split('-').next())
+            .and_then(|d| d.parse::<u32>().ok())
+            .map_or(i + 1, |n| n as usize);
         out.push_str(&format!(
             "{n}. {practice}\n   why: {}\n   for: {}\n\n",
             v["why"].as_str().unwrap_or(""),
