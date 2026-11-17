@@ -14,6 +14,11 @@ description: How a change reaches main in the ecosystem - its own branch, checks
 - **Check like CI**: Rust - `rust_checked` (fmt, clippy -D warnings, tests). linux-phone-oco/docs - after
   the last data change, `tad canon && tad render && make -s verify` (its CI compares the rendered pages; a
   row entered after rendering fails it). Shell scripts - `sh -n` and shellcheck.
+- **In linux-phone-oco** (since 2026-11-17): no glimpse - the commit and its pull request are the record,
+  signed by your OCOECO_BY; records go into linux-phone-oco/docs through `tad r NAME --project PLACE ...`
+  (record-the-work skill). Land with plain `land`, or `landit` (it makes no glimpse where a place exports
+  none). One commit per branch, with a conventional title: a pull request of several commits is titled
+  after its branch.
 - **Record in the same change**: a glimpse is made by `landit`; decisions (with what was rejected), the
   backlog item's next step and the session log go in the owning place's own data (record-the-work skill).
 - **Land**: `landit "SUMMARY" KIND` (summary at most 88 characters; KIND feat, fix, docs, ...). It waits for

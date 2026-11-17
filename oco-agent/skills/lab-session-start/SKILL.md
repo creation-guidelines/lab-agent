@@ -7,7 +7,7 @@ description: Start of every session on the lab machine (open-commons ecosystem, 
 
 1. `lab-agent guide` - the live practices. Read them whole; they outrank any brief.
 2. In every shell that works on the ecosystem: `export OCOECO_BY=<your role>` (bring-up, orchestration,
-   research-<feature>, ...) then `. oco-work`. Your name goes on every record, so the face shows where each
+   research-<feature>, ...) then `. oco-work`. Your name goes on every record and signs every commit (oco-work makes it the git author), so the face shows where each
    session stands. Never call `land` from a shell that has not sourced `oco-work` (without it `land` also
    merges pending release PRs).
 3. `lab-agent inbox` - print every unread message, answer each, then `lab-agent inbox --ack`.

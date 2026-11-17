@@ -86,3 +86,4 @@
 {"id":"g-20261117-013233","at":"2026-11-17T01:32:33Z","by":"claude","kind":"feat","summary":"Skills shared by every agent on the lab: start, land, change the phone, record","touches":"decisions:2026-11-17-skills-shared-by-every-agent"}
 {"id":"g-20261117-021335","at":"2026-11-17T02:13:35Z","by":"orchestration","kind":"fix","summary":"landit returns to main in a worktree too, as land does"}
 {"id":"g-20261117-032840","at":"2026-11-17T03:28:40Z","by":"conveyor-tad","kind":"feat","summary":"landit makes no glimpse where a place exports none; commits are signed by the session"}
+{"id":"g-20261117-034600","at":"2026-11-17T03:46:00Z","by":"conveyor-tad","kind":"docs","summary":"the skills say linux-phone's way: data through tad in docs, landing through land"}
