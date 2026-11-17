@@ -88,3 +88,4 @@
 {"id":"g-20261117-032840","at":"2026-11-17T03:28:40Z","by":"conveyor-tad","kind":"feat","summary":"landit makes no glimpse where a place exports none; commits are signed by the session"}
 {"id":"g-20261117-034600","at":"2026-11-17T03:46:00Z","by":"conveyor-tad","kind":"docs","summary":"the skills say linux-phone's way: data through tad in docs, landing through land"}
 {"id":"g-20261117-095729","at":"2026-11-17T09:57:29Z","by":"ideal-agent","kind":"feat","summary":"guide reads the practices from ideal-agent; the shared skills moved there","touches":"decisions:2026-11-17-skills-moved-to-ideal-agent"}
+{"id":"g-20261117-114122","at":"2026-11-17T11:41:22Z","by":"ideal-agent","kind":"fix","summary":"landit checks a tad place with tad, never ocoeco","touches":"decisions:2026-11-17-landit-checks-tad-places-with-tad"}

@@ -19,6 +19,7 @@
 #   looks_same NAME            stop unless they look as they did when kept - but for what moves by itself
 #   timed COMMAND...           how long a command takes
 #   landit SUMMARY [KIND]      check, record, commit and land the place one is in, and be back at its main;
+#                              a place kept by tad is checked by tad (and make verify) and committed, no glimpse;
 #                              where that place keeps these words, the ones that landed are put to use
 #   holds_everywhere           stop unless every place under ~/Projects holds
 #   released REPO              merge the release pull request of owner/repo, once it is there; wait until
@@ -191,19 +192,28 @@ timed() { { time -p "$@" >/dev/null 2>&1; } 2>&1 | awk '/^real/ { print $2 "s" }
 landit() {
     local out check=(ocoeco check)
     [ "${#1}" -le 88 ] || stop "the summary is ${#1} characters and at most 88 fit: $1"
-    # a change to the language is checked where it is read: with the places beside the language's place,
-    # every lens they keep comes into focus with the language as it would land
-    if [ "${PWD#"$PLACES"/}" = "$OCOECO" ] && [ -n "$(git diff --name-only origin/main -- language)" ]; then
-        check+=(--root "$PLACES")
+    # a place kept by tad (tables.toml beside its data) is checked by tad alone, as its CI checks it - its rows
+    # and rules, and its pages where it renders them - and depends on nothing of ocoeco (the author, 2026-11-17)
+    if [ -f tables.toml ]; then
+        out=$(tad check < /dev/null 2>&1) || { echo "$out" | tail -5; stop "the data at $PWD does not hold"; }
+        if grep -q '^verify:' Makefile 2>/dev/null; then
+            out=$(make -s verify < /dev/null 2>&1) || { echo "$out" | tail -5; stop "the place at $PWD is not as its CI checks it"; }
+        fi
+    else
+        # a change to the language is checked where it is read: with the places beside the language's place,
+        # every lens they keep comes into focus with the language as it would land
+        if [ "${PWD#"$PLACES"/}" = "$OCOECO" ] && [ -n "$(git diff --name-only origin/main -- language)" ]; then
+            check+=(--root "$PLACES")
+        fi
+        out=$("${check[@]}" < /dev/null 2>&1)
+        echo "$out" | tail -1 | grep -q "all is well" || {
+            echo "$out" | grep FAIL | head -3 | cut -c1-220
+            stop "the place at $PWD does not hold"
+        }
     fi
-    out=$("${check[@]}" < /dev/null 2>&1)
-    echo "$out" | tail -1 | grep -q "all is well" || {
-        echo "$out" | grep FAIL | head -3 | cut -c1-220
-        stop "the place at $PWD does not hold"
-    }
     # a place that keeps its record of work in glimpses says it as one; a place that exports none (linux-phone-oco,
     # since 2026-11-17) has its record in the commit itself, and the commit is all there is to make
-    if grep -qE '^glimpses[[:space:]]*=' oco.toml 2>/dev/null; then
+    if [ ! -f tables.toml ] && grep -qE '^glimpses[[:space:]]*=' oco.toml 2>/dev/null; then
         XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
     elif [ -n "$(git status --porcelain)" ]; then
         git add -A && git commit -qm "${2:-docs}: $1" || stop "committing the work in $PWD"
