@@ -8,6 +8,19 @@ description: Where thinking, decisions, research, backlog, milestones and the au
 Nothing may depend on anyone remembering: it goes into the owning project's own data, in the same change
 as the work, and propagates to the observatory by itself.
 
+**In linux-phone-oco, everything goes through tad in one database: linux-phone-oco/docs** (the author,
+2026-11-17; docs' decision `2026-11-17-one-database`). Data through tad, landing through land, nothing of
+ocoeco by hand: no `ocoeco note`, no glimpse, no oco/ tables in any linux-phone place. In a worktree of docs,
+write with its named records, naming the place: `tad r decision --project surya-lab --id DATE-slug
+--decision ... --why ... --rejected ...`; `tad r research`, `tad r source`, `tad r backlog`, `tad r
+backlog-status`, `tad r session-log`, `tad r concept`, `tad r milestone-readiness`; read with `tad q backlog|
+decisions|research [--project ...]`; `tad statements` lists them with their parameters. A missing one is a new
+file in docs' `records/` or `queries/`, in the same change. `tad canon && tad render`, then `land`. The
+commit and its pull request are the record of the work, signed by your OCOECO_BY. Why, measured: the turn
+commit-title limit failed 4 times, link refusals ordered the work 3 times, two tools wrote rows in one place.
+
+Everywhere else in the commons:
+
 - **Decisions**: `ocoeco note decisions --id DATE-slug --set date=... --set decision=... --set why=...
   --set rejected=...` - always with what was rejected and why; `about=` a milestone where one fits.
 - **Research**: `ocoeco note research --id ... --set question=... --set found=...` (sources inside the text
