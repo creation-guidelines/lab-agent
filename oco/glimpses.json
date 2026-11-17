@@ -85,3 +85,4 @@
 {"id":"g-20261116-193654","at":"2026-11-16T19:36:54Z","by":"claude","kind":"fix","summary":"the released word waits for the newest release said, never a draft","where":"linux-package-distribution-oco/conveyor/decisions:2026-11-16-a-release-is-said-once-its-files-are-there"}
 {"id":"g-20261117-013233","at":"2026-11-17T01:32:33Z","by":"claude","kind":"feat","summary":"Skills shared by every agent on the lab: start, land, change the phone, record","touches":"decisions:2026-11-17-skills-shared-by-every-agent"}
 {"id":"g-20261117-021335","at":"2026-11-17T02:13:35Z","by":"orchestration","kind":"fix","summary":"landit returns to main in a worktree too, as land does"}
+{"id":"g-20261117-032840","at":"2026-11-17T03:28:40Z","by":"conveyor-tad","kind":"feat","summary":"landit makes no glimpse where a place exports none; commits are signed by the session"}

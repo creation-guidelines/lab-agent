@@ -46,9 +46,11 @@
 
 export GH_TOKEN="$(cat ~/.config/lab-agent/token)"
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-export GIT_AUTHOR_NAME=lab-agent-session GIT_AUTHOR_EMAIL=agent@creation-guidelines
-export GIT_COMMITTER_NAME=lab-agent-session GIT_COMMITTER_EMAIL=agent@creation-guidelines
 export OCOECO_BY="${OCOECO_BY:-claude}" LAND_RELEASE=0
+# the commits are signed by who made them - the name a session works under (OCOECO_BY): where the commits and
+# pull requests are the record of work (linux-phone-oco, since 2026-11-17), the face reads that name off them
+export GIT_AUTHOR_NAME="$OCOECO_BY" GIT_AUTHOR_EMAIL=agent@creation-guidelines
+export GIT_COMMITTER_NAME="$OCOECO_BY" GIT_COMMITTER_EMAIL=agent@creation-guidelines
 set -o pipefail
 
 PLACES="$HOME/Projects"
@@ -199,7 +201,13 @@ landit() {
         echo "$out" | grep FAIL | head -3 | cut -c1-220
         stop "the place at $PWD does not hold"
     }
-    XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
+    # a place that keeps its record of work in glimpses says it as one; a place that exports none (linux-phone-oco,
+    # since 2026-11-17) has its record in the commit itself, and the commit is all there is to make
+    if grep -qE '^glimpses[[:space:]]*=' oco.toml 2>/dev/null; then
+        XDG_DATA_HOME="$_oco_trail" ocoeco glimpse "$1" --kind "${2:-docs}" >/dev/null && ocoeco commit >/dev/null || stop "recording the work in $PWD"
+    elif [ -n "$(git status --porcelain)" ]; then
+        git add -A && git commit -qm "${2:-docs}: $1" || stop "committing the work in $PWD"
+    fi
     out=$(land --no-manual 2>&1)
     if echo "$out" | grep -q "merged into"; then
         echo "  landed: ${PWD#"$PLACES"/}"
