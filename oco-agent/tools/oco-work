@@ -207,7 +207,9 @@ landit() {
         echo "$out" | tail -5
         stop "landing $PWD"
     fi
-    git checkout -q main && git fetch -q && git reset -q --hard origin/main
+    # back at main as GitHub has it: on main where this clone may check it out, else (a worktree, while
+    # another clone holds main) detached at origin/main - as land's own at_main does
+    git fetch -q && { { git checkout -q main 2>/dev/null && git reset -q --hard origin/main; } || git checkout -q --detach origin/main; }
     [ "${PWD#"$PLACES"/}" != "$LAB_AGENT" ] || _oco_words_in_use
     _oco_place=""
 }
