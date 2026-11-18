@@ -7,7 +7,13 @@ use serde_json::{json, Value};
 /// repo). No generated SDK, no async runtime - one struct, one blocking
 /// client, kept simple on purpose.
 pub struct Client {
-    token: String,
+    token: std::sync::RwLock<String>,
+    /// A token file this client reads again when its modification time changes (a rotated token),
+    /// with the modification time last read.
+    watch: Option<(
+        std::path::PathBuf,
+        std::sync::Mutex<Option<std::time::SystemTime>>,
+    )>,
     /// The API root: <https://api.github.com>, or a GitHub Enterprise server's.
     base: String,
     agent: ureq::Agent,
@@ -46,6 +52,25 @@ impl std::fmt::Display for RateLimited {
 
 impl std::error::Error for RateLimited {}
 
+/// GitHub did not accept the token (HTTP 401): it was revoked, rotated or is wrong. Retrying
+/// the same token will never work, so callers say so loudly instead of retrying quietly.
+#[derive(Debug)]
+pub struct Unauthorized {
+    pub what: String,
+}
+
+impl std::fmt::Display for Unauthorized {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}: GitHub refused the token (401 Unauthorized)",
+            self.what
+        )
+    }
+}
+
+impl std::error::Error for Unauthorized {}
+
 fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -56,6 +81,11 @@ fn unix_now() -> u64 {
 /// An HTTP failure as an error: a spent budget becomes [`RateLimited`] (so callers can wait for
 /// it instead of retrying into a wall); anything else keeps GitHub's own status text.
 fn fail(what: &str, e: ureq::Error) -> anyhow::Error {
+    if matches!(&e, ureq::Error::Status(401, _)) {
+        return anyhow::Error::new(Unauthorized {
+            what: what.to_string(),
+        });
+    }
     if let ureq::Error::Status(code, resp) = &e {
         let spent = resp.header("x-ratelimit-remaining") == Some("0")
             || resp.header("retry-after").is_some();
@@ -111,7 +141,8 @@ impl Client {
 
     pub fn with_base(token: String, base: &str) -> Self {
         Client {
-            token,
+            token: std::sync::RwLock::new(token),
+            watch: None,
             base: base.trim_end_matches('/').to_string(),
             agent: ureq::AgentBuilder::new()
                 // a request that hangs must not hold the agent for ever without a word
@@ -124,12 +155,46 @@ impl Client {
         }
     }
 
+    /// Watches the file the token was read from: a request after it changed (the token was rotated)
+    /// uses what it holds now, with no restart.
+    pub fn watching(mut self, path: std::path::PathBuf) -> Self {
+        let seen = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        self.watch = Some((path, std::sync::Mutex::new(seen)));
+        self
+    }
+
+    /// Reads the watched token file again when its modification time differs from the last read.
+    /// Returns whether the token changed. An unreadable or empty file keeps the token in use.
+    pub fn refresh_token(&self) -> bool {
+        let Some((path, seen)) = &self.watch else {
+            return false;
+        };
+        let now = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        let mut seen = seen.lock().unwrap_or_else(|e| e.into_inner());
+        if now.is_none() || now == *seen {
+            return false;
+        }
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let fresh = text.trim();
+        *seen = now;
+        let mut token = self.token.write().unwrap_or_else(|e| e.into_inner());
+        if fresh.is_empty() || *token == fresh {
+            return false;
+        }
+        *token = fresh.to_string();
+        true
+    }
+
     fn api(&self, tail: &str) -> String {
         format!("{}{tail}", self.base)
     }
 
     fn auth(&self, req: ureq::Request) -> ureq::Request {
-        req.set("Authorization", &format!("Bearer {}", self.token))
+        self.refresh_token();
+        let token = self.token.read().unwrap_or_else(|e| e.into_inner()).clone();
+        req.set("Authorization", &format!("Bearer {token}"))
             .set("Accept", "application/vnd.github+json")
             .set("User-Agent", "lab-agent")
     }
@@ -436,5 +501,52 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("cut short"), "{e}");
+    }
+
+    #[test]
+    fn a_401_is_unauthorized_not_a_quiet_retry() {
+        let client = serve(vec![json(
+            "401 Unauthorized",
+            "{\"message\":\"Bad credentials\"}",
+            "",
+        )]);
+        let err = client.repo_exists("o", "r").unwrap_err();
+        assert!(err.downcast_ref::<Unauthorized>().is_some(), "{err:#}");
+        assert!(format!("{err:#}").contains("401"), "{err:#}");
+    }
+
+    #[test]
+    fn a_rotated_token_file_is_read_again_without_a_restart() {
+        let dir = std::env::temp_dir().join(format!("lab-agent-token-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("token");
+        std::fs::write(&path, "old-token\n").unwrap();
+        let client =
+            Client::with_base("old-token".into(), "http://127.0.0.1:1").watching(path.clone());
+        assert!(!client.refresh_token(), "the file has not changed");
+        // a rotation: new content and a later modification time
+        std::fs::write(&path, "new-token\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(client.refresh_token(), "the rotated file is read");
+        assert_eq!(&*client.token.read().unwrap(), "new-token");
+        assert!(!client.refresh_token(), "and once only");
+        // an emptied file keeps the token in use
+        std::fs::write(&path, "").unwrap();
+        let later = later + std::time::Duration::from_secs(5);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(!client.refresh_token());
+        assert_eq!(&*client.token.read().unwrap(), "new-token");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

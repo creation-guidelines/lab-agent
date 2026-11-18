@@ -166,6 +166,68 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The client, reading the token file again when it changes: a rotated token needs no restart. A token
+/// given by the environment is fixed for the process, so only a file-read token is watched.
+fn watched(token: String) -> Client {
+    let client = Client::new(token);
+    if std::env::var(crate::contract::ENV_TOKEN).is_ok_and(|t| !t.trim().is_empty()) {
+        client
+    } else {
+        client.watching(crate::config::token_path())
+    }
+}
+
+/// Polls in a row that GitHub refused the token before the user is told (about half a minute).
+const REFUSED_BEFORE_TELLING: u32 = 6;
+/// The user is told again at this interval while the token stays refused.
+const TELL_AGAIN: Duration = Duration::from_secs(3600);
+
+/// A refused token is not a transient error: said once loudly (stderr and an urgent notification, when
+/// notifications are set up), again every hour, and once more when GitHub accepts the token again.
+struct Refusals {
+    count: u32,
+    told: Option<std::time::Instant>,
+}
+
+impl Refusals {
+    fn refused(&mut self, e: &anyhow::Error) {
+        self.count += 1;
+        let due = self.count >= REFUSED_BEFORE_TELLING
+            && self.told.is_none_or(|t| t.elapsed() >= TELL_AGAIN);
+        if !due {
+            return;
+        }
+        self.told = Some(std::time::Instant::now());
+        let text = format!(
+            "{e:#} - {} polls in a row. No job runs until the token in {} is replaced (the agent reads it again when the file changes).",
+            self.count,
+            crate::config::token_path().display()
+        );
+        eprintln!("lab-agent: TOKEN REFUSED: {text}");
+        if let Some(cfg) = crate::notify::load() {
+            let _ = crate::notify::Notifier::new(cfg).send(
+                crate::notify::Level::Urgent,
+                "lab-agent: GitHub refuses its token",
+                &text,
+            );
+        }
+    }
+
+    fn accepted(&mut self) {
+        if self.told.take().is_some() {
+            eprintln!("lab-agent: GitHub accepts the token again");
+            if let Some(cfg) = crate::notify::load() {
+                let _ = crate::notify::Notifier::new(cfg).send(
+                    crate::notify::Level::Info,
+                    "lab-agent: token accepted again",
+                    "Polling works again.",
+                );
+            }
+        }
+        self.count = 0;
+    }
+}
+
 /// The main loop: poll the jobs repo, dispatch unclaimed jobs, push results. Polling and dispatch
 /// run independently of job *execution* - a job that hangs blocks only itself, never the poll
 /// loop.
@@ -175,7 +237,7 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// A job found `running` after a restart was cut off by it, and is recorded as `interrupted`.
 pub fn run(cfg: Config, token: String) -> Result<()> {
     let shared = Arc::new(Shared {
-        client: Client::new(token),
+        client: watched(token),
         cfg: cfg.clone(),
         running: Mutex::new(HashMap::new()),
         push_lock: Mutex::new(()),
@@ -215,10 +277,17 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
     let exe = std::env::current_exe().ok();
     let exe_id = exe.as_deref().and_then(file_id);
     let mut state = PollState::default();
+    let mut refusals = Refusals {
+        count: 0,
+        told: None,
+    };
     loop {
         flush_unsent(&shared, &state_dir);
         let pause = match poll_once(&shared, &mut claimed, &state_dir, &mut state) {
-            Ok(()) => Duration::from_secs(cfg.poll_seconds),
+            Ok(()) => {
+                refusals.accepted();
+                Duration::from_secs(cfg.poll_seconds)
+            }
             // A spent budget is not a transient error: asking again only spends the next hour's too.
             Err(e) => match e.downcast_ref::<RateLimited>() {
                 Some(limited) => {
@@ -226,7 +295,11 @@ pub fn run(cfg: Config, token: String) -> Result<()> {
                     limited.wait().min(Duration::from_secs(3600))
                 }
                 None => {
-                    eprintln!("lab-agent: poll error (will retry): {e:#}");
+                    if e.downcast_ref::<crate::github::Unauthorized>().is_some() {
+                        refusals.refused(&e);
+                    } else {
+                        eprintln!("lab-agent: poll error (will retry): {e:#}");
+                    }
                     Duration::from_secs(cfg.poll_seconds)
                 }
             },

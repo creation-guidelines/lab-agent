@@ -91,3 +91,4 @@
 {"id":"g-20261117-114122","at":"2026-11-17T11:41:22Z","by":"ideal-agent","kind":"fix","summary":"landit checks a tad place with tad, never ocoeco","touches":"decisions:2026-11-17-landit-checks-tad-places-with-tad"}
 {"id":"g-20261117-115321","at":"2026-11-17T11:53:21Z","by":"orchestration","kind":"fix","summary":"landit checks a linux-phone place without ocoeco"}
 {"id":"g-20261117-120206","at":"2026-11-17T12:02:06Z","by":"ideal-agent","kind":"fix","summary":"guide numbers each practice by its id, as the session start does"}
+{"id":"g-20261118-123422","at":"2026-11-18T12:34:22Z","by":"lab-agent-token-path","kind":"fix","summary":"the daemon reads a rotated token again and says loudly when GitHub refuses it"}
